@@ -35,6 +35,18 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 chmod 0700 "$WORK"
 
+if [[ -f "$ENCRYPTED.sha256" ]]; then
+  EXPECTED_SHA="$(tr -d '[:space:]' < "$ENCRYPTED.sha256")"
+  ACTUAL_SHA="$(sha256sum "$ENCRYPTED" | awk '{print $1}')"
+  if [[ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]]; then
+    echo "SHA-256 mismatch; refusing to restore a damaged or altered backup." >&2
+    exit 1
+  fi
+  echo "SHA-256 checksum: OK"
+else
+  echo "No sidecar checksum supplied; continuing with decryption and database integrity checks."
+fi
+
 age -d -i "$IDENTITY" -o "$WORK/backup.sqlite3.gz" "$ENCRYPTED"
 gzip -t "$WORK/backup.sqlite3.gz"
 gzip -dc "$WORK/backup.sqlite3.gz" > "$WORK/restored.sqlite3"
@@ -58,15 +70,30 @@ read -r -p "This replaces the live database at $DATABASE_PATH. Type RESTORE to c
 if [[ "$CONFIRM" != "RESTORE" ]]; then echo "Cancelled."; exit 1; fi
 systemctl stop class-merit-hub
 mkdir -p "$(dirname "$DATABASE_PATH")"
+PREVIOUS_DATABASE=""
 if [[ -f "$DATABASE_PATH" ]]; then
-  cp -a "$DATABASE_PATH" "$DATABASE_PATH.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+  PREVIOUS_DATABASE="$DATABASE_PATH.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+  cp -a "$DATABASE_PATH" "$PREVIOUS_DATABASE"
 fi
 install -o classmerit -g classmerit -m 0640 "$WORK/restored.sqlite3" "$DATABASE_PATH"
 rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm"
 systemctl start class-merit-hub
 sleep 5
 if ! curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; then
-  echo "Health check failed after restore. Inspect journalctl -u class-merit-hub."
+  echo "Health check failed after restore."
+  if [[ -n "$PREVIOUS_DATABASE" && -f "$PREVIOUS_DATABASE" ]]; then
+    echo "Rolling back to the pre-restore database..."
+    systemctl stop class-merit-hub || true
+    install -o classmerit -g classmerit -m 0640 "$PREVIOUS_DATABASE" "$DATABASE_PATH"
+    rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm"
+    systemctl start class-merit-hub
+  else
+    echo "No previous database existed to roll back to."
+  fi
+  echo "Inspect journalctl -u class-merit-hub for the cause."
   exit 1
 fi
 echo "Restore completed and app health check passed."
+if [[ -n "$PREVIOUS_DATABASE" ]]; then
+  echo "Pre-restore database retained at: $PREVIOUS_DATABASE"
+fi
