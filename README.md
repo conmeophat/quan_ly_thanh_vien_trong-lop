@@ -114,10 +114,17 @@ run.ps1              # Khởi chạy từ PowerShell
 
 ## 8. Triển khai Oracle Cloud Always Free
 
-Dự án đã chuẩn bị hướng dẫn và script triển khai trên Oracle Cloud Always Free: Ubuntu 24.04 ARM64, systemd auto-restart, Caddy HTTPS, DuckDNS miễn phí, ổ dữ liệu bền vững, sao lưu SQLite hằng ngày được age-encrypt và gửi sang OCI Object Storage.
+Dự án đã chuẩn bị hướng dẫn và script triển khai trên Oracle Cloud Always Free: Ubuntu 24.04 ARM64, systemd auto-restart, Caddy HTTPS, DuckDNS miễn phí và SQLite trên ổ lưu trữ bền vững. Hệ thống backup tạo bản SQLite nhất quán, gzip, mã hóa age, kèm checksum SHA-256; lưu bản gần trên VM và OCI Object Storage, đồng thời có thể gửi thêm bản mã hóa sang nhà cung cấp độc lập qua rclone.
+
+Đã bổ sung:
+- [deploy/oracle/backup.sh](deploy/oracle/backup.sh): backup mã hóa, checksum, OCI và đích rclone tùy chọn.
+- [deploy/oracle/configure_rclone_backup.sh](deploy/oracle/configure_rclone_backup.sh): cấu hình kho sao lưu thứ hai.
+- [deploy/oracle/verify_backup.sh](deploy/oracle/verify_backup.sh): kiểm tra checksum, giải mã và SQLite integrity mà không ghi đè dữ liệu chạy.
+- [deploy/oracle/restore.sh](deploy/oracle/restore.sh): khôi phục ngay cả khi VM mới chưa cấu hình backup.
+- [deploy/oracle/README.md](deploy/oracle/README.md): quy trình phục hồi sau khi VM bị thu hồi/hỏng.
 
 Bắt đầu tại [deploy/oracle/README.md](deploy/oracle/README.md). Các script cài đặt nằm trong [deploy/oracle](deploy/oracle/).
 
-**Giới hạn quan trọng:** Oracle có thể thu hồi máy ảo Always Free bị coi là idle theo ngưỡng sử dụng trong 7 ngày. Kiến trúc một VM không có failover/SLA 24/7; backup cùng tenancy không bảo vệ nếu toàn bộ tài khoản OCI bị mất. Do đó 0 đồng là mục tiêu theo hạn mức, không phải cam kết uptime hoặc lưu trữ vĩnh viễn.
+**Giới hạn quan trọng:** Oracle có thể thu hồi máy ảo Always Free bị coi là idle; nhà cung cấp lưu trữ có thể thay đổi quota/chính sách; VM mới có thể không còn capacity. Một VM không có failover/SLA 24/7. Các lớp backup giúp giảm nguy cơ mất dữ liệu và dựng lại hệ thống, nhưng không bảo đảm uptime tuyệt đối hay lưu trữ vĩnh viễn. Dịch vụ lưu trữ thứ hai cần được cấu hình trong tài khoản riêng và vẫn chịu giới hạn của nhà cung cấp đó.
 
-**Không đưa .env, app.env, token DuckDNS, mật khẩu, khóa age riêng hoặc file SQLite lên GitHub.** Chỉ chạy một tiến trình ứng dụng ghi vào SQLite.
+**Không đưa .env, app.env, token DuckDNS, mật khẩu, khóa age riêng, token rclone hoặc file SQLite plaintext lên GitHub.** Chỉ chạy một tiến trình ứng dụng ghi vào SQLite. Giữ khóa age riêng và recipient công khai ở ít nhất hai nơi ngoại tuyến an toàn; nếu mất khóa riêng, các bản backup mã hóa không thể giải mã.
