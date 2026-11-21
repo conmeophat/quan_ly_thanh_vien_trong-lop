@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 if [[ "$EUID" -ne 0 ]]; then echo "Run with sudo."; exit 1; fi
 if [[ ! -f /etc/class-merit-hub/app.env ]]; then echo "Install the app first."; exit 1; fi
+cd /opt/class-merit-hub
 
 echo "Installing OCI CLI into isolated Python virtual environment..."
 if [[ ! -x /opt/oci-cli/bin/oci ]]; then
