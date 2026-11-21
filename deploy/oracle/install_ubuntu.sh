@@ -67,19 +67,16 @@ install -d -o root -g root -m 0700 /var/backups/class-merit-hub
 
 if [[ ! -f "$ETC_DIR/app.env" ]]; then
   STORAGE_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
-  BOOTSTRAP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
   cat > "$ETC_DIR/app.env" <<EOF
 HOST=127.0.0.1
 PORT=8080
 COOKIE_SECURE=true
 DATABASE_PATH=$DB_DIR/class_tracker.sqlite3
 NICEGUI_STORAGE_SECRET=$STORAGE_SECRET
-BOOTSTRAP_TOKEN=$BOOTSTRAP_TOKEN
 EOF
   chown root:"$APP_USER" "$ETC_DIR/app.env"
   chmod 0640 "$ETC_DIR/app.env"
-  printf '%s\n' "$BOOTSTRAP_TOKEN" > /root/class-merit-bootstrap-token.txt
-  chmod 0600 /root/class-merit-bootstrap-token.txt
+  rm -f /root/class-merit-bootstrap-token.txt
 else
   echo "Existing app.env found. Keeping current secrets and database path unchanged."
 fi
@@ -232,8 +229,4 @@ echo "Domain: https://$DOMAIN"
 echo "Health check: https://$DOMAIN/healthz"
 echo "App: journalctl -u class-merit-hub -n 100 --no-pager"
 echo "Caddy: journalctl -u caddy -n 100 --no-pager"
-if [[ -f /root/class-merit-bootstrap-token.txt ]]; then
-  echo "One-time founder token: sudo cat /root/class-merit-bootstrap-token.txt"
-  echo "Delete that file after creating the founder account. Never paste it into chat or GitHub."
-fi
 echo "IMPORTANT: Open TCP 80/443 in the OCI NSG/Security List; restrict TCP 22 to your own IP."
