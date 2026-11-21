@@ -113,14 +113,6 @@ class PermissionTests(unittest.TestCase):
                                 "NewMemberStrong!2026", "member", 1)
         self.assertEqual(db.get_user_by_id(new_id)["group_no"], 1)
 
-    def test_leader_cannot_create_account_in_another_group(self):
-        with self.assertRaises(db.PermissionDenied):
-            db.create_user(self.leader1, "Outsider", "outsider01", "OUT01",
-                           "OutsiderStrong!2026", "member", 2)
-        new_id = db.create_user(self.leader1, "New Member", "member03", "M003",
-                                "NewMemberStrong!2026", "member", 1)
-        self.assertEqual(db.get_user_by_id(new_id)["group_no"], 1)
-
     def test_five_wrong_logins_lock_the_account(self):
         for _ in range(5):
             user, message = db.authenticate("0900000005", "wrong-password")
