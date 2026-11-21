@@ -24,27 +24,26 @@ class PermissionTests(unittest.TestCase):
         db.DB_PATH.with_suffix(".sqlite3-shm").unlink(missing_ok=True)
         db.init_db()
         self.founder_id = db.create_founder(
-            "Founder", "founder01", "ROOT001", "FounderStrongPass!2026",
-            "long-bootstrap-token-0123456789-abcdef", "long-bootstrap-token-0123456789-abcdef",
+            "Founder", "0900000001", "FounderStrongPass!2026", local_setup_allowed=True
         )
         self.founder = db.get_user_by_id(self.founder_id)
         self.teacher_id = db.create_user(
-            self.founder, "Teacher", "teacher01", "T001", "TeacherStrongPass!2026", "teacher", None
+            self.founder, "Teacher", "0900000002", "TeacherStrongPass!2026", "teacher", None
         )
         self.teacher = db.get_user_by_id(self.teacher_id)
         self.leader1_id = db.create_user(
-            self.founder, "Leader One", "leader01", "L001", "LeaderOneStrong!2026", "leader", 1
+            self.founder, "Leader One", "0900000003", "LeaderOneStrong!2026", "leader", 1
         )
         self.leader2_id = db.create_user(
-            self.founder, "Leader Two", "leader02", "L002", "LeaderTwoStrong!2026", "leader", 2
+            self.founder, "Leader Two", "0900000004", "LeaderTwoStrong!2026", "leader", 2
         )
         self.leader1 = db.get_user_by_id(self.leader1_id)
         self.leader2 = db.get_user_by_id(self.leader2_id)
         self.member1_id = db.create_user(
-            self.leader1, "Member One", "member01", "M001", "MemberOneStrong!2026", "member", 1
+            self.leader1, "Member One", "0900000005", "MemberOneStrong!2026", "member", 1
         )
         self.member2_id = db.create_user(
-            self.leader2, "Member Two", "member02", "M002", "MemberTwoStrong!2026", "member", 2
+            self.leader2, "Member Two", "0900000006", "MemberTwoStrong!2026", "member", 2
         )
         self.member1 = db.get_user_by_id(self.member1_id)
         self.member2 = db.get_user_by_id(self.member2_id)
@@ -101,13 +100,18 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(db.member_summary(self.teacher, self.member2_id)["id"], self.member2_id)
         self.assertEqual(db.member_summary(self.founder, self.member1_id)["id"], self.member1_id)
 
-    def test_person_code_and_username_are_unique(self):
+    def test_phone_number_is_unique(self):
         with self.assertRaises(db.ValidationError):
-            db.create_user(self.teacher, "Duplicate Person", "newuser01", "M001",
+            db.create_user(self.teacher, "Duplicate Person", "0900000005",
                            "NewPersonStrong!2026", "member", 1)
-        with self.assertRaises(db.ValidationError):
-            db.create_user(self.teacher, "Another Person", "member01", "M003",
-                           "AnotherPersonStrong!2026", "member", 1)
+
+    def test_leader_cannot_create_account_in_another_group(self):
+        with self.assertRaises(db.PermissionDenied):
+            db.create_user(self.leader1, "Outsider", "0900000008",
+                           "OutsiderStrong!2026", "member", 2)
+        new_id = db.create_user(self.leader1, "New Member", "0900000007",
+                                "NewMemberStrong!2026", "member", 1)
+        self.assertEqual(db.get_user_by_id(new_id)["group_no"], 1)
 
     def test_leader_cannot_create_account_in_another_group(self):
         with self.assertRaises(db.PermissionDenied):
@@ -119,20 +123,20 @@ class PermissionTests(unittest.TestCase):
 
     def test_five_wrong_logins_lock_the_account(self):
         for _ in range(5):
-            user, message = db.authenticate("member01", "wrong-password")
+            user, message = db.authenticate("0900000005", "wrong-password")
             self.assertIsNone(user)
-        user, message = db.authenticate("member01", "MemberOneStrong!2026")
+        user, message = db.authenticate("0900000005", "MemberOneStrong!2026")
         self.assertIsNone(user)
         self.assertIn("khóa", message.lower())
 
     def test_admin_cannot_create_second_active_leader_in_same_group(self):
         with self.assertRaises(db.ValidationError):
-            db.create_user(self.teacher, "Second Leader", "leader03", "L003",
+            db.create_user(self.teacher, "Second Leader", "0900000009",
                            "SecondLeaderStrong!2026", "leader", 1)
 
     def test_teacher_can_edit_a_member_account_and_revoke_old_session(self):
         old_version = self.member1["session_version"]
-        db.update_account(self.teacher, self.member1_id, "Member One Updated", "member01a", "M001",
+        db.update_account(self.teacher, self.member1_id, "Member One Updated", "0900000010",
                           "member", 3)
         updated = db.get_user_by_id(self.member1_id)
         self.assertEqual(updated["group_no"], 3)
@@ -148,8 +152,34 @@ class PermissionTests(unittest.TestCase):
 
     def test_only_one_active_homeroom_teacher_can_exist(self):
         with self.assertRaises(db.ValidationError):
-            db.create_user(self.founder, "Second Teacher", "teacher02", "T002",
+            db.create_user(self.founder, "Second Teacher", "0900000011",
                            "SecondTeacherStrong!2026", "teacher", None)
+
+    def test_eight_character_password_is_accepted_and_shorter_is_rejected(self):
+        new_id = db.create_user(self.teacher, "Eight Char", "0900000012",
+                                "Password", "member", 1)
+        self.assertIsNotNone(db.get_user_by_id(new_id))
+        with self.assertRaises(PasswordPolicyError):
+            db.create_user(self.teacher, "Short Password", "0900000013",
+                           "short7", "member", 1)
+
+    def test_only_founder_and_teacher_can_change_or_reset_passwords(self):
+        with self.assertRaises(db.PermissionDenied):
+            db.change_own_password(self.leader1, self.leader1_id,
+                                   "LeaderOneStrong!2026", "NewLeaderPass88")
+        with self.assertRaises(db.PermissionDenied):
+            db.change_own_password(self.member1, self.member1_id,
+                                   "MemberOneStrong!2026", "NewMemberPass88")
+        with self.assertRaises(db.PermissionDenied):
+            db.admin_reset_password(self.leader1, self.member1_id, "ResetPass88")
+        db.admin_reset_password(self.teacher, self.member1_id, "ResetPass88")
+        user, message = db.authenticate("0900000005", "ResetPass88")
+        self.assertIsNotNone(user)
+
+        db.change_own_password(self.founder, self.founder_id,
+                               "FounderStrongPass!2026", "FounderNewPass88")
+        user, message = db.authenticate("0900000001", "FounderNewPass88")
+        self.assertIsNotNone(user)
 
 
 if __name__ == "__main__":
