@@ -23,12 +23,30 @@ APP_ENV=/etc/class-merit-hub/app.env
 DB_PATH="$(grep '^DATABASE_PATH=' "$APP_ENV" | tail -n1 | cut -d= -f2-)"
 RECIPIENT_FILE=/etc/class-merit-hub/backup-recipient.txt
 if [[ ! -s "$RECIPIENT_FILE" ]]; then
-  age-keygen -o /root/class-merit-backup-identity.txt
-  chmod 0600 /root/class-merit-backup-identity.txt
-  age-keygen -y /root/class-merit-backup-identity.txt > "$RECIPIENT_FILE"
-  chmod 0640 "$RECIPIENT_FILE"
-  chown root:root "$RECIPIENT_FILE"
-  echo "Created age encryption key pair. Copy /root/class-merit-backup-identity.txt off the VM and keep it offline."
+  EXISTING_BACKUP_COUNT="$(
+    oci os object list --auth instance_principal --namespace-name "$NAMESPACE" \
+      --bucket-name "$BUCKET" --prefix class-merit-hub/ --all --output json \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(1 for x in d.get("data",[]) if x["name"].endswith(".sqlite3.gz.age")))'
+  )"
+  if (( EXISTING_BACKUP_COUNT > 0 )); then
+    echo "Existing Class Merit Hub backups were found in this bucket."
+    echo "To keep them decryptable, supply the OLD public age recipient from your offline copy."
+    read -r -p "Existing age public recipient (age1...): " EXISTING_RECIPIENT
+    if [[ ! "$EXISTING_RECIPIENT" =~ ^age1[a-z0-9]{40,}$ ]]; then
+      echo "Invalid age recipient. Refusing to create a new key that cannot decrypt existing backups." >&2
+      exit 1
+    fi
+    printf '%s\\n' "$EXISTING_RECIPIENT" > "$RECIPIENT_FILE"
+    chmod 0640 "$RECIPIENT_FILE"
+    chown root:root "$RECIPIENT_FILE"
+  else
+    age-keygen -o /root/class-merit-backup-identity.txt
+    chmod 0600 /root/class-merit-backup-identity.txt
+    age-keygen -y /root/class-merit-backup-identity.txt > "$RECIPIENT_FILE"
+    chmod 0640 "$RECIPIENT_FILE"
+    chown root:root "$RECIPIENT_FILE"
+    echo "Created a new age key pair. Copy both the private identity and public recipient off the VM."
+  fi
 fi
 
 cat > /etc/class-merit-hub/backup.env <<EOF
