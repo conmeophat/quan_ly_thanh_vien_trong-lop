@@ -44,7 +44,14 @@ PAGE_STYLES = """
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
-    """Health check endpoint without exposing user or database information."""
+    """Check both the app process and SQLite without exposing private details."""
+    from fastapi import HTTPException
+
+    try:
+        with db.connection() as conn:
+            conn.execute("SELECT 1").fetchone()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
     return {"status": "ok"}
 
 
