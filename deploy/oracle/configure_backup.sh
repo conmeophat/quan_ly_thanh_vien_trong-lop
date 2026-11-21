@@ -64,6 +64,7 @@ WantedBy=timers.target
 EOF
 
 install -m 0750 -o root -g root deploy/oracle/backup.sh /usr/local/sbin/class-merit-backup
+install -m 0750 -o root -g root deploy/oracle/verify_backup.sh /usr/local/sbin/class-merit-verify-backup
 systemctl daemon-reload
 systemctl enable --now class-merit-backup.timer
 systemctl start class-merit-backup.service
