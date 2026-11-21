@@ -65,7 +65,7 @@ try {
     Write-Host "[3/5] Giai nen va kiem tra SQLite..."
     $InputStream = [System.IO.File]::OpenRead($GzipPath)
     try {
-        $GzipStream = New-Object System.IO.Compression.GzipStream(
+        $GzipStream = [System.IO.Compression.GzipStream]::new(
             $InputStream,
             [System.IO.Compression.CompressionMode]::Decompress
         )
