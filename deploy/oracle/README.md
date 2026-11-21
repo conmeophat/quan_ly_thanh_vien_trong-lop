@@ -202,14 +202,14 @@ scp ubuntu@YOUR_VM_PUBLIC_IP:/home/ubuntu/class-merit-backup-identity.txt .
 
 Giữ ít nhất hai bản sao ngoại tuyến an toàn. Mất khóa riêng đồng nghĩa không thể giải mã các bản backup.
 
-Sau khi tải xuống và xác minh khóa đã lưu an toàn, nên xóa bản khóa riêng trên VM bằng:
+Sau khi tải xuống và xác minh khóa đã lưu an toàn, xóa các bản khóa riêng trên VM:
 
 ~~~bash
 sudo shred -u /root/class-merit-backup-identity.txt
 sudo shred -u /home/ubuntu/class-merit-backup-identity.txt
 ~~~
 
-Máy chủ vẫn mã hóa được backup vì chỉ cần khóa công khai trong /etc/class-merit-hub/backup-recipient.txt.
+Khi đó máy chủ chỉ giữ khóa công khai trong /etc/class-merit-hub/backup-recipient.txt và vẫn mã hóa được backup. Không xóa bản ngoại tuyến. Khi cần khôi phục, tải khóa riêng trở lại VM tạm thời, dùng nó để giải mã, rồi xóa bản tạm sau khi khôi phục thành công.
 
 ### 7.5. Kiểm tra backup
 
@@ -234,11 +234,20 @@ oci os object get --auth instance_principal \
   --file /tmp/class-merit-restore.sqlite3.gz.age
 ~~~
 
-Chuyển khóa riêng lên VM bằng SCP, sau đó chạy:
+Chuyển khóa riêng lên VM bằng SCP từ máy Windows (thay IP và tên người dùng SSH):
+
+~~~powershell
+scp .\class-merit-backup-identity.txt ubuntu@YOUR_VM_PUBLIC_IP:/home/ubuntu/
+~~~
+
+Sau đó chạy trên VM:
 
 ~~~bash
-sudo bash deploy/oracle/restore.sh /tmp/class-merit-restore.sqlite3.gz.age /path/to/class-merit-backup-identity.txt
+sudo chmod 600 /home/ubuntu/class-merit-backup-identity.txt
+sudo bash /opt/class-merit-hub/deploy/oracle/restore.sh /tmp/class-merit-restore.sqlite3.gz.age /home/ubuntu/class-merit-backup-identity.txt
 ~~~
+
+Sau khi xác nhận ứng dụng đã khôi phục bình thường, xóa bản khóa riêng tạm trên VM bằng shred.
 
 Script giải mã, kiểm tra gzip, SQLite integrity và bảng bắt buộc trước khi hỏi xác nhận. File database cũ được giữ lại với hậu tố pre-restore. Sau khôi phục, kiểm tra health check, đăng nhập và hồ sơ điểm.
 
@@ -250,12 +259,13 @@ sudo bash /opt/class-merit-hub/deploy/oracle/update.sh
 
 Script sẽ tạo backup trước (nếu đã cấu hình), kéo mã nguồn mới, cài dependencies, khởi động lại service và gọi health check.
 
-Trạng thái dịch vụ:
+Trạng thái dịch vụ và watchdog:
 
 ~~~bash
 sudo systemctl status class-merit-hub caddy --no-pager
+sudo systemctl list-timers class-merit-healthcheck.timer class-merit-backup.timer
+sudo journalctl -u class-merit-healthcheck -n 100 --no-pager
 sudo journalctl -u class-merit-hub -f
-sudo systemctl list-timers
 ~~~
 
 ## 9. Giới hạn uptime và độ bền dữ liệu — phải hiểu trước khi sử dụng
@@ -263,7 +273,7 @@ sudo systemctl list-timers
 - Oracle ghi rõ máy ảo Always Free nhàn rỗi có thể bị thu hồi. Một instance bị coi là idle nếu trong 7 ngày liên tục: CPU utilization ở percentile 95 dưới 20%, network utilization dưới 20%, và riêng A1 thì memory utilization dưới 20%.
 - Website lớp học ít truy cập có thể rơi vào ngưỡng này. Không có cách hợp lệ để đảm bảo Oracle không thu hồi máy bằng cách giả lập tải.
 - Chỉ có một VM và một Caddy reverse proxy. VM lỗi, bảo trì, lỗi mạng, lỗi vùng trung tâm dữ liệu, hết capacity, lỗi tài khoản hoặc thay đổi điều khoản nhà cung cấp đều có thể làm website ngừng hoạt động.
-- systemd tự khởi động lại tiến trình ứng dụng khi lỗi, nhưng không thể sửa chữa hỏng phần cứng hoặc khôi phục VM đã bị thu hồi.
+- systemd tự khởi động lại tiến trình ứng dụng khi lỗi. Watchdog nội bộ kiểm tra mỗi phút và thử restart ứng dụng/Caddy khi health check thất bại; cơ chế này không thể sửa chữa hỏng phần cứng hoặc khôi phục VM đã bị thu hồi.
 - Boot/Block Volume tồn tại qua restart thông thường, nhưng không phải lưu trữ vĩnh viễn bất khả xâm phạm. Nếu tenancy bị đóng, tài nguyên bị xóa hoặc vùng gặp sự cố, dữ liệu có thể không truy cập được.
 - Backup vào Object Storage cùng tenancy giúp khôi phục khi VM hỏng, nhưng không bảo vệ đầy đủ trước việc tài khoản OCI bị khóa hoặc mất quyền toàn tenancy. Giữ bản mã hóa ngoại tuyến ở nơi khác và thử phục hồi định kỳ.
 - Hệ thống một máy chủ không có failover tự động, không có cam kết SLA 24/7 và không có RPO/RTO được bảo đảm.
