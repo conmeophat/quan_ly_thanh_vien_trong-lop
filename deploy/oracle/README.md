@@ -87,7 +87,7 @@ Script sẽ hỏi subdomain và token DuckDNS. Sau đó tự động:
 - Clone phiên bản main mới nhất vào /opt/class-merit-hub.
 - Tạo virtual environment và cài requirements.
 - Tạo user hệ thống riêng classmerit, không có quyền đăng nhập.
-- Tạo các bí mật NICEGUI_STORAGE_SECRET và BOOTSTRAP_TOKEN ngẫu nhiên trong /etc/class-merit-hub/app.env.
+- Tạo khóa NICEGUI_STORAGE_SECRET ngẫu nhiên trong /etc/class-merit-hub/app.env.
 - Đặt DATABASE_PATH trên data volume nếu đã mount trước; nếu không thì trên boot volume.
 - Chạy ứng dụng bằng systemd, tự khởi động lại khi lỗi.
 - Chỉ bind ứng dụng ở 127.0.0.1:8080.
@@ -113,21 +113,25 @@ sudo journalctl -u caddy -n 100 --no-pager
 
 Nếu chứng chỉ chưa cấp, kiểm tra DNS đã phân giải về đúng public IP và cả hai lớp firewall đều mở cổng 80/443. Việc cấp chứng chỉ cần DNS và mạng hoạt động.
 
-## 6. Tạo tài khoản người sáng lập
+## 6. Tạo tài khoản người sáng lập lần đầu
 
-Installer tạo một token thiết lập ban đầu và lưu ở file root-only:
+Vì tài khoản Người sáng lập đầu tiên chỉ được tạo từ kết nối cục bộ, hãy mở SSH tunnel từ máy tính cá nhân tới VM. Không tạo tài khoản này trực tiếp qua địa chỉ HTTPS công khai.
 
-~~~bash
-sudo cat /root/class-merit-bootstrap-token.txt
+Trên PowerShell máy tính cá nhân, chạy (thay `ubuntu` và IP bằng thông tin VM thực tế):
+
+~~~powershell
+ssh -L 8080:127.0.0.1:8080 ubuntu@PUBLIC_IP
 ~~~
 
-Nhập token tại màn hình thiết lập người sáng lập trên website HTTPS, tạo tên đăng nhập và mật khẩu mạnh, rồi xóa token:
+Giữ cửa sổ SSH đang mở. Trên trình duyệt của máy tính cá nhân, truy cập:
 
-~~~bash
-sudo shred -u /root/class-merit-bootstrap-token.txt
+~~~text
+http://127.0.0.1:8080
 ~~~
 
-Không gửi token hoặc mật khẩu cho người khác. Lưu thông tin người sáng lập trong trình quản lý mật khẩu.
+Tạo tài khoản Người sáng lập bằng đúng ba trường: họ và tên, số điện thoại, mật khẩu. Sau khi tạo xong, đăng nhập qua domain HTTPS công khai như thông thường và đóng cửa sổ SSH tunnel.
+
+Không có mã thiết lập hiển thị trên biểu mẫu. Endpoint khởi tạo đầu tiên bị chặn khi yêu cầu không đến từ loopback; không mở trực tiếp cổng 8080 ra Internet. Lưu số điện thoại và mật khẩu Người sáng lập trong trình quản lý mật khẩu.
 
 ## 7. Thiết lập backup mã hóa sang Object Storage
 
