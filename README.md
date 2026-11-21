@@ -110,3 +110,10 @@ requirements.txt     # Thư viện cần cài
 .env.example         # Mẫu cấu hình bí mật (không chứa bí mật thật)
 run.ps1              # Khởi chạy từ PowerShell
 ```
+
+
+## 8. Triển khai công khai có HTTPS
+
+Xem hướng dẫn triển khai Railway đầy đủ tại [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md). Hướng dẫn bao gồm thiết lập biến môi trường bí mật, gắn Volume tại `/data`, bật health check `/healthz`, tạo domain HTTPS và kiểm tra lại bốn vai trò trước khi dùng dữ liệu thật.
+
+**Không đưa `.env`, mật khẩu, mã thiết lập hoặc file SQLite lên GitHub.** Chỉ chạy một replica khi dùng SQLite.
