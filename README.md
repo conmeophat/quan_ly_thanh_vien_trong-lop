@@ -116,6 +116,9 @@ run.ps1              # Khởi chạy từ PowerShell
 
 ## 8. Triển khai Oracle Cloud Always Free
 
+**Muốn cho cả lớp truy cập từ điện thoại/máy tính ở bất kỳ đâu?** Xem hướng dẫn triển khai từng bước dành cho Windows/PowerShell: [deploy/oracle/WINDOWS_QUICKSTART_VI.md](deploy/oracle/WINDOWS_QUICKSTART_VI.md). Website sẽ được phục vụ bằng domain DuckDNS miễn phí và HTTPS; máy chủ cloud phải được tạo trong tài khoản Oracle Cloud của chủ dự án.
+
+
 Dự án đã chuẩn bị hướng dẫn và script triển khai trên Oracle Cloud Always Free: Ubuntu 24.04 ARM64, systemd auto-restart, Caddy HTTPS, DuckDNS miễn phí và SQLite trên ổ lưu trữ bền vững. Hệ thống backup tạo bản SQLite nhất quán, gzip, mã hóa age, kèm checksum SHA-256; lưu bản gần trên VM và OCI Object Storage, đồng thời có thể gửi thêm bản mã hóa sang nhà cung cấp độc lập qua rclone.
 
 Đã bổ sung:
