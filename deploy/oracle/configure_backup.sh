@@ -36,7 +36,7 @@ if [[ ! -s "$RECIPIENT_FILE" ]]; then
       echo "Invalid age recipient. Refusing to create a new key that cannot decrypt existing backups." >&2
       exit 1
     fi
-    printf '%s\\n' "$EXISTING_RECIPIENT" > "$RECIPIENT_FILE"
+    printf '%s\n' "$EXISTING_RECIPIENT" > "$RECIPIENT_FILE"
     chmod 0640 "$RECIPIENT_FILE"
     chown root:root "$RECIPIENT_FILE"
   else
