@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from pathlib import Path
+
+from fastapi import Request
 
 from dotenv import load_dotenv
 from nicegui import app, ui
@@ -16,15 +19,12 @@ BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
 STORAGE_SECRET = os.getenv("NICEGUI_STORAGE_SECRET", "")
-BOOTSTRAP_TOKEN = os.getenv("BOOTSTRAP_TOKEN", "")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 
 if len(STORAGE_SECRET) < 32:
     raise RuntimeError("NICEGUI_STORAGE_SECRET chưa được cấu hình hoặc ngắn hơn 32 ký tự. Hãy tạo file .env theo README.md.")
-if len(BOOTSTRAP_TOKEN) < 32:
-    raise RuntimeError("BOOTSTRAP_TOKEN chưa được cấu hình hoặc ngắn hơn 32 ký tự. Hãy tạo file .env theo README.md.")
 
 ui.colors(primary="#2457A6", secondary="#64748B", accent="#0F766E", positive="#15803D", negative="#B91C1C")
 PAGE_STYLES = """
@@ -99,12 +99,12 @@ def render_login() -> None:
             render_brand("Cổng thông tin thi đua nội bộ")
             ui.separator()
             ui.label("Đăng nhập tài khoản").classes("text-2xl font-bold").style("color:#172b4d")
-            ui.label("Mỗi người sử dụng tài khoản riêng được cấp bởi quản trị viên.").classes("muted text-sm")
-            username = ui.input("Tên đăng nhập", placeholder="Nhập tên tài khoản").classes("w-full")
+            ui.label("Sử dụng số điện thoại đã đăng ký và mật khẩu được cấp.").classes("muted text-sm")
+            phone = ui.input("Số điện thoại", placeholder="Nhập số điện thoại").classes("w-full")
             password = ui.input("Mật khẩu", password=True, password_toggle_button=True).classes("w-full")
 
             def do_login() -> None:
-                user, message = db.authenticate(username.value or "", password.value or "")
+                user, message = db.authenticate(phone.value or "", password.value or "")
                 if user:
                     app.storage.user["user_id"] = int(user["id"])
                     app.storage.user["session_version"] = int(user.get("session_version", 0))
@@ -115,7 +115,7 @@ def render_login() -> None:
 
             password.on("keydown.enter", do_login)
             ui.button("Đăng nhập", on_click=do_login, icon="login").classes("w-full mt-2")
-            ui.label("Bảo mật: mật khẩu được băm Argon2id; đăng nhập sai 5 lần sẽ khóa tạm thời 15 phút.").classes("text-xs muted")
+            ui.label("Không có chức năng tự đặt lại mật khẩu. Hãy liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm.").classes("text-xs muted")
 
 
 def render_bootstrap() -> None:
@@ -124,22 +124,20 @@ def render_bootstrap() -> None:
             render_brand("Thiết lập hệ thống lần đầu")
             ui.separator()
             ui.label("Tạo tài khoản người sáng lập").classes("text-2xl font-bold").style("color:#172b4d")
-            ui.label("Đây là tài khoản có quyền cao nhất. Chỉ có thể thực hiện bước này một lần.").classes("muted")
-            full_name = ui.input("Họ và tên")
-            username = ui.input("Tên đăng nhập", placeholder="Ví dụ: founder.phat")
-            person_code = ui.input("Mã định danh cá nhân", placeholder="Mã riêng, không được trùng với người khác")
-            token = ui.input("Mã thiết lập một lần", password=True, password_toggle_button=True)
-            password = ui.input("Mật khẩu mạnh", password=True, password_toggle_button=True)
-            password2 = ui.input("Nhập lại mật khẩu", password=True, password_toggle_button=True)
-            ui.label("Mật khẩu tối thiểu 14 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt.").classes("text-xs muted")
+            ui.label("Đây là tài khoản có quyền cao nhất. Chỉ có thể thực hiện bước này một lần và chỉ từ máy chủ cục bộ.").classes("muted")
+            full_name = ui.input("Họ và tên").classes("w-full")
+            phone = ui.input("Số điện thoại", placeholder="Ví dụ: 0912345678").classes("w-full")
+            password = ui.input("Mật khẩu", password=True, password_toggle_button=True).classes("w-full")
+            ui.label("Mật khẩu cần có tối thiểu 8 ký tự.").classes("text-xs muted")
 
             def create_founder_account() -> None:
                 try:
-                    if password.value != password2.value:
-                        raise ValidationError("Hai mật khẩu không trùng khớp.")
-                    user_id = db.create_founder(full_name.value or "", username.value or "",
-                                                person_code.value or "", password.value or "",
-                                                token.value or "", BOOTSTRAP_TOKEN)
+                    user_id = db.create_founder(
+                        full_name.value or "",
+                        phone.value or "",
+                        password.value or "",
+                        local_setup_allowed=True,
+                    )
                     app.storage.user["user_id"] = user_id
                     created_user = db.get_user_by_id(user_id)
                     app.storage.user["session_version"] = int(created_user.get("session_version", 0))
@@ -149,7 +147,6 @@ def render_bootstrap() -> None:
                     notify_error(exc)
 
             ui.button("Khởi tạo người sáng lập", on_click=create_founder_account, icon="verified_user").classes("w-full")
-            ui.label("Nếu không có mã thiết lập, hãy kiểm tra biến BOOTSTRAP_TOKEN trong file .env.").classes("text-xs muted")
 
 
 def role_text(user: dict) -> str:
@@ -187,7 +184,7 @@ def open_change_password_dialog(user_id: int) -> None:
             try:
                 if new.value != confirm.value:
                     raise ValidationError("Hai mật khẩu mới không trùng khớp.")
-                db.change_own_password(user_id, current.value or "", new.value or "")
+                db.change_own_password(fresh_actor(), user_id, current.value or "", new.value or "")
                 updated_user = db.get_user_by_id(user_id)
                 app.storage.user["session_version"] = int(updated_user.get("session_version", 0))
                 dialog.close()
@@ -207,8 +204,7 @@ def open_create_user_dialog(actor: dict, default_group: int | None = None) -> No
     with dialog, ui.card().classes("w-full max-w-lg p-5"):
         ui.label("Thêm tài khoản mới").classes("text-xl font-bold")
         full_name = ui.input("Họ và tên", placeholder="Tên thành viên").classes("w-full")
-        person_code = ui.input("Mã định danh cá nhân", placeholder="Ví dụ: HS001").classes("w-full")
-        username = ui.input("Tên đăng nhập", placeholder="Không trùng với tài khoản khác").classes("w-full")
+        phone = ui.input("Số điện thoại", placeholder="Số điện thoại dùng để đăng nhập").classes("w-full")
         if actor["role"] == "founder":
             role_options = {"teacher": "Giáo viên chủ nhiệm", "leader": "Tổ trưởng", "member": "Thành viên"}
         elif actor["role"] == "teacher":
@@ -221,16 +217,14 @@ def open_create_user_dialog(actor: dict, default_group: int | None = None) -> No
                                  label="Tổ phụ trách").classes("w-full")
         if actor["role"] == "leader":
             group_select.disable()
-        initial_password = ui.input("Mật khẩu khởi tạo", password=True, password_toggle_button=True).classes("w-full")
+        initial_password = ui.input("Mật khẩu", password=True, password_toggle_button=True).classes("w-full")
+        ui.label("Mật khẩu cần có tối thiểu 8 ký tự.").classes("text-xs muted")
         ui.button("Sinh mật khẩu ngẫu nhiên", icon="casino",
                   on_click=lambda: initial_password.set_value(generate_password())).props("outline dense")
-        ui.label("Hãy gửi mật khẩu khởi tạo riêng cho đúng người nhận. Không dùng chung một tài khoản.").classes("text-xs muted")
+        ui.label("Hãy gửi số điện thoại và mật khẩu riêng cho đúng người nhận. Không dùng chung một tài khoản.").classes("text-xs muted")
 
         def update_group_visibility() -> None:
-            if role_select.value == "teacher":
-                group_select.set_visibility(False)
-            else:
-                group_select.set_visibility(True)
+            group_select.set_visibility(role_select.value != "teacher")
 
         role_select.on_value_change(lambda _: update_group_visibility())
         update_group_visibility()
@@ -240,10 +234,10 @@ def open_create_user_dialog(actor: dict, default_group: int | None = None) -> No
                 latest_actor = fresh_actor()
                 role = str(role_select.value)
                 group_no = None if role == "teacher" else int(group_select.value)
-                db.create_user(latest_actor, full_name.value or "", username.value or "",
-                               person_code.value or "", initial_password.value or "", role, group_no)
+                db.create_user(latest_actor, full_name.value or "", phone.value or "",
+                               initial_password.value or "", role, group_no)
                 dialog.close()
-                notify_success("Đã tạo tài khoản. Mã định danh và tên đăng nhập được bảo vệ duy nhất trong hệ thống.")
+                notify_success("Đã tạo tài khoản. Số điện thoại là thông tin đăng nhập và phải duy nhất.")
                 refresh_page()
             except (ValidationError, PermissionDenied, PasswordPolicyError) as exc:
                 notify_error(exc)
@@ -427,7 +421,6 @@ def render_group_panel(actor: dict, group_no: int) -> None:
                     with ui.row().classes("w-full items-start justify-between"):
                         with ui.column().classes("gap-0"):
                             ui.label(member["full_name"]).classes("font-bold")
-                            ui.label(f"@{member['username']}").classes("text-xs muted")
                         ui.badge("Đang hoạt động", color="positive")
                     with ui.row().classes("items-center justify-between"):
                         ui.label("Điểm thi đua hiện tại").classes("text-xs muted")
@@ -450,29 +443,32 @@ def open_edit_account_dialog(account: dict) -> None:
     with dialog, ui.card().classes("w-full max-w-lg p-5"):
         ui.label(f"Chỉnh sửa tài khoản · {account['full_name']}").classes("text-xl font-bold")
         full_name = ui.input("Họ và tên", value=account["full_name"]).classes("w-full")
-        person_code = ui.input("Mã định danh cá nhân", value=account["person_code"]).classes("w-full")
-        username = ui.input("Tên đăng nhập", value=account["username"]).classes("w-full")
+        phone = ui.input("Số điện thoại", value=account.get("phone") or "").classes("w-full")
         role_options = {"leader": "Tổ trưởng", "member": "Thành viên"}
         if actor["role"] == "founder":
             role_options = {"teacher": "Giáo viên chủ nhiệm", **role_options}
         role_select = ui.select(role_options, value=account["role"], label="Vai trò").classes("w-full")
         group_select = ui.select({1: "Tổ 1", 2: "Tổ 2", 3: "Tổ 3", 4: "Tổ 4"},
                                  value=account["group_no"] or 1, label="Tổ").classes("w-full")
+
         def update_visibility() -> None:
             group_select.set_visibility(role_select.value != "teacher")
+
         role_select.on_value_change(lambda _: update_visibility())
         update_visibility()
+
         def save() -> None:
             try:
                 role = str(role_select.value)
                 group_no = None if role == "teacher" else int(group_select.value)
                 db.update_account(fresh_actor(), int(account["id"]), full_name.value or "",
-                                  username.value or "", person_code.value or "", role, group_no)
+                                  phone.value or "", role, group_no)
                 dialog.close()
-                notify_success("Đã cập nhật thông tin tài khoản. Các phiên đăng nhập cũ của tài khoản này đã bị thu hồi.")
+                notify_success("Đã cập nhật thông tin tài khoản. Các phiên đăng nhập cũ đã bị thu hồi.")
                 refresh_page()
             except (ValidationError, PermissionDenied) as exc:
                 notify_error(exc)
+
         with ui.row().classes("w-full justify-end"):
             ui.button("Hủy", on_click=dialog.close, color="grey")
             ui.button("Lưu thay đổi", on_click=save, icon="save")
@@ -526,13 +522,14 @@ def render_account_management(actor: dict) -> None:
         with ui.row().classes("w-full items-center justify-between flex-wrap"):
             with ui.column().classes("gap-0"):
                 ui.label("QUẢN LÝ TÀI KHOẢN").classes("section-title")
-                ui.label("Tên đăng nhập và mã định danh cá nhân đều được đặt ràng buộc duy nhất trong cơ sở dữ liệu.").classes("text-sm muted")
+                ui.label("Số điện thoại là thông tin đăng nhập và phải duy nhất trong hệ thống.").classes("text-sm muted")
             ui.button("Tạo tài khoản", icon="person_add", on_click=lambda: open_create_user_dialog(fresh_actor()))
         for account in accounts:
             with ui.row().classes("w-full items-center justify-between border-b border-gray-100 py-3 flex-wrap gap-2"):
                 with ui.column().classes("gap-0"):
                     ui.label(account["full_name"]).classes("font-semibold")
-                    ui.label(f"@{account['username']} · {role_text(account)} · Mã: {account['person_code']}").classes("text-xs muted")
+                    phone_label = account.get("phone") or "Chưa cập nhật số điện thoại"
+                    ui.label(f"{phone_label} · {role_text(account)}").classes("text-xs muted")
                 with ui.row().classes("items-center gap-1"):
                     ui.badge("Hoạt động" if account["is_active"] else "Đã khóa", color="positive" if account["is_active"] else "grey")
                     if account["role"] != "founder":
@@ -644,17 +641,27 @@ def render_dashboard(user: dict) -> None:
             with ui.tab_panels(tabs, value=overview_tab).classes("w-full bg-transparent"):
                 with ui.tab_panel(overview_tab):
                     render_overview(user)
-                    ui.button("Đổi mật khẩu", icon="lock", on_click=lambda: open_change_password_dialog(int(user["id"])) ).props("outline")
                 with ui.tab_panel(personal_tab):
                     render_personal_records(user)
         with ui.row().classes("w-full justify-between items-center flex-wrap pt-3"):
             ui.label("Class Merit Hub · Dữ liệu được lưu trong cơ sở dữ liệu riêng của hệ thống.").classes("text-xs muted")
-            if role != "member":
+            if role in ("founder", "teacher"):
                 ui.button("Đổi mật khẩu", icon="lock", on_click=lambda: open_change_password_dialog(int(user["id"])) ).props("flat dense")
 
 
+def _is_local_bootstrap_request(request: Request) -> bool:
+    """Only allow first-founder creation from a loopback request on a loopback-bound app."""
+    if HOST.strip().lower() not in {"127.0.0.1", "localhost", "::1"}:
+        return False
+    client_host = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(client_host).is_loopback
+    except ValueError:
+        return client_host.lower() == "localhost"
+
+
 @ui.page("/")
-def index() -> None:
+def index(request: Request) -> None:
     ui.add_head_html(PAGE_STYLES)
     db.init_db()
     user_id = app.storage.user.get("user_id")
@@ -668,8 +675,13 @@ def index() -> None:
         app.storage.user.pop("session_version", None)
     if db.founder_exists():
         render_login()
-    else:
+    elif _is_local_bootstrap_request(request):
         render_bootstrap()
+    else:
+        with ui.column().classes("w-full min-h-screen items-center justify-center p-6"):
+            with ui.card().classes("soft-card max-w-xl p-6"):
+                render_brand("Thiết lập hệ thống lần đầu")
+                ui.label("Vì lý do bảo mật, tài khoản Người sáng lập đầu tiên chỉ được tạo từ máy chủ cục bộ. Hãy mở website trên máy chủ hoặc kết nối qua SSH tunnel đến localhost.").classes("text-sm muted")
 
 
 if __name__ in {"__main__", "__mp_main__"}:
