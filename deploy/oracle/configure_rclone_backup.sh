@@ -17,9 +17,19 @@ fi
 echo
 echo "First configure an rclone remote for a SEPARATE provider/account."
 echo "Do not choose another bucket in the same OCI tenancy as your only off-site copy."
-echo "Run 'rclone config' in this terminal if you have not configured a remote yet."
 echo "Provider OAuth/API credentials must be entered here, never pasted into chat or GitHub."
-read -r -p "Press Enter after rclone config is complete (or Ctrl+C to stop). "
+install -d -m 0700 /root/.config/rclone
+if [[ ! -s /root/.config/rclone/rclone.conf ]]; then
+  echo "Starting rclone's interactive remote setup..."
+  rclone config
+else
+  chmod 0600 /root/.config/rclone/rclone.conf
+  read -r -p "Use the existing root-owned rclone config? [Y/n]: " USE_EXISTING
+  if [[ "$USE_EXISTING" =~ ^[Nn]$ ]]; then rclone config; fi
+fi
+if [[ -s /root/.config/rclone/rclone.conf ]]; then
+  chmod 0600 /root/.config/rclone/rclone.conf
+fi
 
 read -r -p "Remote path (example: gdrive:ClassMeritHub): " REMOTE
 if [[ ! "$REMOTE" =~ ^[A-Za-z0-9_.-]+:[A-Za-z0-9_./-]+$ ]]; then
