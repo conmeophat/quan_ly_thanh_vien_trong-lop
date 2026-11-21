@@ -119,6 +119,11 @@ run.ps1              # Khởi chạy từ PowerShell
 **Muốn cho cả lớp truy cập từ điện thoại/máy tính ở bất kỳ đâu?** Xem hướng dẫn triển khai từng bước dành cho Windows/PowerShell: [deploy/oracle/WINDOWS_QUICKSTART_VI.md](deploy/oracle/WINDOWS_QUICKSTART_VI.md). Website sẽ được phục vụ bằng domain DuckDNS miễn phí và HTTPS; máy chủ cloud phải được tạo trong tài khoản Oracle Cloud của chủ dự án.
 
 
+## 9. Chọn phương án hosting lâu dài
+
+Không có cách biến hosting miễn phí thành máy chủ vô hạn hoặc bảo đảm uptime 24/7. Đã bổ sung [bảng so sánh các nền tảng và phương án vận hành lâu dài](deploy/HOSTING_OPTIONS_VI.md), gồm Oracle Cloud, máy chủ tại nhà, Google Cloud Run, Render, Koyeb, Hugging Face Spaces, PythonAnywhere, Fly.io, GitHub Pages và GitHub Actions. Tài liệu cũng nêu rõ giới hạn lưu trữ, sleep/idle, bảo vệ database và cách phục hồi khi VM bị thu hồi.
+
+
 Dự án đã chuẩn bị hướng dẫn và script triển khai trên Oracle Cloud Always Free: Ubuntu 24.04 ARM64, systemd auto-restart, Caddy HTTPS, DuckDNS miễn phí và SQLite trên ổ lưu trữ bền vững. Hệ thống backup tạo bản SQLite nhất quán, gzip, mã hóa age, kèm checksum SHA-256; lưu bản gần trên VM và OCI Object Storage, đồng thời có thể gửi thêm bản mã hóa sang nhà cung cấp độc lập qua rclone.
 
 Đã bổ sung:
