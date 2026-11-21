@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import secrets
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -57,6 +59,7 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 person_code TEXT NOT NULL COLLATE NOCASE UNIQUE,
                 username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                phone TEXT COLLATE NOCASE,
                 full_name TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL CHECK(role IN ('founder','teacher','leader','member')),
@@ -125,12 +128,19 @@ def init_db() -> None:
         user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
         if "session_version" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0")
+        if "phone" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN phone TEXT COLLATE NOCASE")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique "
+            "ON users(phone) WHERE phone IS NOT NULL"
+        )
 
 
 def _user_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
     if row is None:
         return None
-    return {key: row[key] for key in row.keys() if key != "password_hash"}
+    hidden_fields = {"password_hash", "username", "person_code"}
+    return {key: row[key] for key in row.keys() if key not in hidden_fields}
 
 
 def _get_user_by_id(conn: sqlite3.Connection, user_id: int) -> dict[str, Any] | None:
@@ -155,25 +165,43 @@ def _audit(conn: sqlite3.Connection, actor_id: int | None, action: str,
     )
 
 
-def create_founder(full_name: str, username: str, person_code: str, password: str,
-                   bootstrap_token: str, configured_token: str | None) -> int:
+def _legacy_identity_values() -> tuple[str, str]:
+    """Fill legacy NOT NULL columns for databases created by older releases."""
+    return secrets.token_hex(16), secrets.token_hex(16)
+
+
+def create_founder(full_name: str, phone: str, password: str, *,
+                   local_setup_allowed: bool = False) -> int:
+    if not local_setup_allowed:
+        raise PermissionDenied("Tài khoản người sáng lập đầu tiên chỉ được tạo từ kết nối cục bộ.")
     if founder_exists():
         raise ValidationError("Tài khoản người sáng lập đã được khởi tạo.")
-    if not verify_bootstrap_token(bootstrap_token, configured_token):
-        raise PermissionDenied("Mã thiết lập không hợp lệ hoặc chưa được cấu hình đủ mạnh.")
-    full_name, username, person_code = _validate_identity(full_name, username, person_code)
-    password_hash = hash_password(password, username)
+    full_name, phone = _validate_identity(full_name, phone)
+    password_hash = hash_password(password)
+    legacy_person_code, legacy_username = _legacy_identity_values()
     with connection() as conn:
         if conn.execute("SELECT 1 FROM users WHERE role='founder'").fetchone():
             raise ValidationError("Tài khoản người sáng lập đã được tạo bởi một phiên khác.")
         cursor = conn.execute(
-            "INSERT INTO users(person_code, username, full_name, password_hash, role, group_no) "
-            "VALUES(?,?,?,?, 'founder', NULL)",
-            (person_code, username, full_name, password_hash),
+            "INSERT INTO users(person_code, username, phone, full_name, password_hash, role, group_no) "
+            "VALUES(?,?,?,?,?, 'founder', NULL)",
+            (legacy_person_code, legacy_username, phone, full_name, password_hash),
         )
         user_id = int(cursor.lastrowid)
         _audit(conn, user_id, "founder_bootstrap", user_id, "Khởi tạo tài khoản người sáng lập")
         return user_id
+
+
+def _validate_identity(full_name: str, phone: str) -> tuple[str, str]:
+    full_name = (full_name or "").strip()
+    phone = (phone or "").strip()
+    phone = re.sub(r"[\s().-]", "", phone)
+    digits = phone[1:] if phone.startswith("+") else phone
+    if not 2 <= len(full_name) <= 100:
+        raise ValidationError("Họ và tên phải có từ 2 đến 100 ký tự.")
+    if not digits.isdigit() or not 9 <= len(digits) <= 15:
+        raise ValidationError("Số điện thoại phải có từ 9 đến 15 chữ số; dấu + chỉ được đặt ở đầu.")
+    return full_name, phone
 
 
 def _validate_identity(full_name: str, username: str, person_code: str) -> tuple[str, str, str]:
@@ -189,9 +217,11 @@ def _validate_identity(full_name: str, username: str, person_code: str) -> tuple
     return full_name, username, person_code
 
 
-def authenticate(username: str, password: str) -> tuple[dict[str, Any] | None, str]:
-    """Authenticate with per-username lockout. Error text does not reveal account existence."""
-    key = (username or "").strip().casefold()[:100] or "<empty>"
+def authenticate(phone: str, password: str) -> tuple[dict[str, Any] | None, str]:
+    """Authenticate by phone number, retaining temporary login for legacy accounts."""
+    login_value = (phone or "").strip()
+    normalized_phone = re.sub(r"[\s().-]", "", login_value)
+    key = normalized_phone.casefold()[:100] or "<empty>"
     now = time.time()
     with connection() as conn:
         throttle = conn.execute(
@@ -202,7 +232,9 @@ def authenticate(username: str, password: str) -> tuple[dict[str, Any] | None, s
             return None, f"Tài khoản đang tạm khóa do đăng nhập sai nhiều lần. Thử lại sau khoảng {remain} phút."
 
         row = conn.execute(
-            "SELECT * FROM users WHERE username=? COLLATE NOCASE AND is_active=1", ((username or "").strip(),)
+            "SELECT * FROM users WHERE (phone=? COLLATE NOCASE OR "
+            "(phone IS NULL AND username=? COLLATE NOCASE)) AND is_active=1 LIMIT 1",
+            (normalized_phone, login_value),
         ).fetchone()
         valid = bool(row and verify_password(row["password_hash"], password or ""))
         if valid:
@@ -219,7 +251,7 @@ def authenticate(username: str, password: str) -> tuple[dict[str, Any] | None, s
         )
         if locked_until:
             return None, "Tài khoản đang tạm khóa 15 phút do đăng nhập sai nhiều lần."
-        return None, "Tên đăng nhập hoặc mật khẩu không chính xác."
+        return None, "Số điện thoại hoặc mật khẩu không chính xác."
 
 
 def _refresh_actor(actor: dict[str, Any]) -> dict[str, Any]:
@@ -251,11 +283,11 @@ def _check_member_scope(actor: dict[str, Any], member: sqlite3.Row | dict[str, A
     raise PermissionDenied("Bạn không có quyền truy cập dữ liệu của thành viên này.")
 
 
-def create_user(actor: dict[str, Any], full_name: str, username: str, person_code: str,
+def create_user(actor: dict[str, Any], full_name: str, phone: str,
                 password: str, role: str, group_no: int | None) -> int:
     actor = _refresh_actor(actor)
     _check_actor(actor, ("founder", "teacher", "leader"))
-    full_name, username, person_code = _validate_identity(full_name, username, person_code)
+    full_name, phone = _validate_identity(full_name, phone)
     if role not in ("teacher", "leader", "member"):
         raise PermissionDenied("Không thể tạo tài khoản với vai trò này.")
     actor_role = actor["role"]
@@ -269,13 +301,14 @@ def create_user(actor: dict[str, Any], full_name: str, username: str, person_cod
             raise ValidationError("Vui lòng chọn tổ từ 1 đến 4.")
     else:
         group_no = None
-    password_hash = hash_password(password, username)
+    password_hash = hash_password(password)
+    legacy_person_code, legacy_username = _legacy_identity_values()
     with connection() as conn:
         try:
             cursor = conn.execute(
-                "INSERT INTO users(person_code, username, full_name, password_hash, role, group_no) "
-                "VALUES(?,?,?,?,?,?)",
-                (person_code, username, full_name, password_hash, role, group_no),
+                "INSERT INTO users(person_code, username, phone, full_name, password_hash, role, group_no) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (legacy_person_code, legacy_username, phone, full_name, password_hash, role, group_no),
             )
         except sqlite3.IntegrityError as exc:
             msg = str(exc).lower()
@@ -285,14 +318,12 @@ def create_user(actor: dict[str, Any], full_name: str, username: str, person_cod
                 raise ValidationError("Lớp đã có tài khoản giáo viên chủ nhiệm đang hoạt động.") from exc
             if "one_founder" in msg:
                 raise ValidationError("Hệ thống đã có người sáng lập.") from exc
-            if "person_code" in msg:
-                raise ValidationError("Mã định danh này đã có tài khoản. Mỗi người chỉ được cấp một tài khoản.") from exc
-            if "username" in msg:
-                raise ValidationError("Tên đăng nhập đã tồn tại. Vui lòng chọn tên khác.") from exc
+            if "phone" in msg:
+                raise ValidationError("Số điện thoại này đã được dùng cho một tài khoản khác.") from exc
             raise ValidationError("Không thể tạo tài khoản do dữ liệu bị trùng hoặc không hợp lệ.") from exc
         user_id = int(cursor.lastrowid)
         _audit(conn, int(actor["id"]), "create_user", user_id,
-               f"Tạo tài khoản {username}; vai trò={role}; tổ={group_no or 'Không áp dụng'}")
+               f"Tạo tài khoản với số điện thoại {phone}; vai trò={role}; tổ={group_no or 'Không áp dụng'}")
         return user_id
 
 
@@ -301,23 +332,23 @@ def list_visible_accounts(actor: dict[str, Any], group_no: int | None = None) ->
     role = actor.get("role")
     with connection() as conn:
         if role == "founder":
-            sql = "SELECT id, person_code, username, full_name, role, group_no, is_active, created_at FROM users"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users"
             params: tuple[Any, ...] = ()
             if group_no in GROUPS:
                 sql += " WHERE group_no=?"
                 params = (group_no,)
         elif role == "teacher":
-            sql = "SELECT id, person_code, username, full_name, role, group_no, is_active, created_at FROM users WHERE role IN ('leader','member')"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users WHERE role IN ('leader','member')"
             params = ()
             if group_no in GROUPS:
                 sql += " AND group_no=?"
                 params = (group_no,)
         elif role == "leader":
             # Strictly limited to the leader's own group; never returns other groups' accounts.
-            sql = "SELECT id, person_code, username, full_name, role, group_no, is_active, created_at FROM users WHERE role='member' AND group_no=?"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users WHERE role='member' AND group_no=?"
             params = (int(actor["group_no"]),)
         else:
-            sql = "SELECT id, person_code, username, full_name, role, group_no, is_active, created_at FROM users WHERE id=?"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users WHERE id=?"
             params = (int(actor["id"]),)
         rows = conn.execute(sql + " ORDER BY group_no, role, full_name", params).fetchall()
         return [dict(row) for row in rows]
@@ -333,7 +364,7 @@ def list_group_members(actor: dict[str, Any], group_no: int) -> list[dict[str, A
         raise PermissionDenied("Bạn không có quyền xem danh sách thành viên của tổ.")
     with connection() as conn:
         rows = conn.execute(
-            "SELECT id, person_code, username, full_name, role, group_no, is_active, created_at "
+            "SELECT id, phone, full_name, role, group_no, is_active, created_at "
             "FROM users WHERE role='member' AND group_no=? AND is_active=1 ORDER BY full_name",
             (group_no,),
         ).fetchall()
@@ -523,11 +554,11 @@ def delete_evaluation(actor: dict[str, Any], member_id: int, evaluation_id: int)
         _audit(conn, int(actor["id"]), "delete_evaluation", member_id, f"Ẩn đánh giá={evaluation_id}")
 
 
-def update_account(actor: dict[str, Any], target_id: int, full_name: str, username: str,
-                   person_code: str, role: str, group_no: int | None) -> None:
+def update_account(actor: dict[str, Any], target_id: int, full_name: str,
+                   phone: str, role: str, group_no: int | None) -> None:
     actor = _refresh_actor(actor)
     _check_actor(actor, ("founder", "teacher"))
-    full_name, username, person_code = _validate_identity(full_name, username, person_code)
+    full_name, phone = _validate_identity(full_name, phone)
     if role not in ("teacher", "leader", "member"):
         raise PermissionDenied("Không thể gán vai trò này.")
     if actor["role"] == "teacher" and role == "teacher":
@@ -542,19 +573,17 @@ def update_account(actor: dict[str, Any], target_id: int, full_name: str, userna
             raise ValidationError("Không tìm thấy tài khoản.")
         _check_account_admin_scope(actor, target)
         if target["id"] == actor["id"]:
-            raise ValidationError("Không thể tự đổi vai trò hoặc mã định danh của tài khoản đang đăng nhập.")
+            raise ValidationError("Không thể tự đổi vai trò hoặc số điện thoại của tài khoản đang đăng nhập.")
         try:
             conn.execute(
-                "UPDATE users SET full_name=?, username=?, person_code=?, role=?, group_no=?, "
+                "UPDATE users SET full_name=?, phone=?, role=?, group_no=?, "
                 "session_version=session_version+1 WHERE id=?",
-                (full_name, username, person_code, role, group_no, target_id),
+                (full_name, phone, role, group_no, target_id),
             )
         except sqlite3.IntegrityError as exc:
             msg = str(exc).lower()
-            if "person_code" in msg:
-                raise ValidationError("Mã định danh này đã thuộc về một tài khoản khác.") from exc
-            if "username" in msg:
-                raise ValidationError("Tên đăng nhập đã được sử dụng.") from exc
+            if "phone" in msg:
+                raise ValidationError("Số điện thoại này đã thuộc về một tài khoản khác.") from exc
             if "one_active_leader" in msg or "users.group_no" in msg:
                 raise ValidationError("Tổ được chọn đã có tổ trưởng đang hoạt động.") from exc
             if "one_active_teacher" in msg:
@@ -599,25 +628,31 @@ def admin_reset_password(actor: dict[str, Any], target_id: int, new_password: st
     actor = _refresh_actor(actor)
     _check_actor(actor, ("founder", "teacher"))
     with connection() as conn:
-        target = conn.execute("SELECT id, role, username FROM users WHERE id=?", (target_id,)).fetchone()
+        target = conn.execute("SELECT id, role FROM users WHERE id=?", (target_id,)).fetchone()
         if not target:
             raise ValidationError("Không tìm thấy tài khoản.")
         _check_account_admin_scope(actor, target)
-        password_hash = hash_password(new_password, target["username"])
+        password_hash = hash_password(new_password)
         conn.execute("UPDATE users SET password_hash=?, session_version=session_version+1 WHERE id=?",
                      (password_hash, target_id))
-        _audit(conn, int(actor["id"]), "admin_reset_password", target_id, "Quản trị viên đặt lại mật khẩu")
+        _audit(conn, int(actor["id"]), "admin_reset_password", target_id,
+               "Người sáng lập/Giáo viên chủ nhiệm đặt lại mật khẩu")
 
 
-def change_own_password(user_id: int, current_password: str, new_password: str) -> None:
+def change_own_password(actor: dict[str, Any], user_id: int,
+                        current_password: str, new_password: str) -> None:
+    actor = _refresh_actor(actor)
+    _check_actor(actor, ("founder", "teacher"))
+    if int(actor["id"]) != int(user_id):
+        raise PermissionDenied("Chỉ Người sáng lập hoặc Giáo viên chủ nhiệm được đổi mật khẩu của chính mình.")
     with connection() as conn:
-        row = conn.execute("SELECT username, password_hash FROM users WHERE id=? AND is_active=1", (user_id,)).fetchone()
+        row = conn.execute("SELECT password_hash FROM users WHERE id=? AND is_active=1", (user_id,)).fetchone()
         if not row or not verify_password(row["password_hash"], current_password or ""):
             raise ValidationError("Mật khẩu hiện tại không chính xác.")
-        password_hash = hash_password(new_password, row["username"])
+        password_hash = hash_password(new_password)
         conn.execute("UPDATE users SET password_hash=?, session_version=session_version+1 WHERE id=?",
                      (password_hash, user_id))
-        _audit(conn, user_id, "change_own_password", user_id, "Người dùng tự đổi mật khẩu")
+        _audit(conn, user_id, "change_own_password", user_id, "Người quản trị tự đổi mật khẩu")
 
 
 def recent_audit(actor: dict[str, Any], limit: int = 50) -> list[dict[str, Any]]:
