@@ -133,9 +133,11 @@ Trên bất kỳ điện thoại hoặc máy tính nào có Internet, mở domai
 
 `https://TEN-SUBDOMAIN.duckdns.org`
 
-Người sáng lập hoặc Giáo viên chủ nhiệm tạo tài khoản cho từng người. Thành viên đăng nhập bằng số điện thoại và mật khẩu được cấp.
+Người dùng chọn **Đăng ký tài khoản**, nhập họ tên, số điện thoại, mật khẩu và tổ dự kiến. Hệ thống chỉ tạo tài khoản **Thành viên** ở trạng thái **Chờ duyệt**; người đăng ký không thể tự cấp quyền Giáo viên, Tổ trưởng hoặc Người sáng lập.
 
-Không có đăng ký tự do, không có nút quên mật khẩu. Khi quên mật khẩu, thành viên liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm.
+Người sáng lập đăng nhập, vào mục **Tài khoản**, đối chiếu thông tin với danh sách lớp rồi chọn duyệt hoặc từ chối. Sau khi được duyệt, thành viên dùng số điện thoại và mật khẩu đã đăng ký để tự đăng nhập. Nếu chọn nhầm tổ, Người sáng lập có thể chỉnh sửa thông tin trước hoặc sau khi duyệt.
+
+Lưu ý: hệ thống hiện chưa gửi SMS OTP để xác minh quyền sở hữu số điện thoại. Vì vậy, không tự động duyệt tài khoản chỉ dựa trên thông tin người đăng ký khai báo. Không có nút quên mật khẩu; khi quên mật khẩu, thành viên liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm.
 
 ## 8. Dữ liệu, sao lưu và giới hạn miễn phí
 

@@ -100,6 +100,56 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(db.member_summary(self.teacher, self.member2_id)["id"], self.member2_id)
         self.assertEqual(db.member_summary(self.founder, self.member1_id)["id"], self.member1_id)
 
+
+    def test_self_registered_member_waits_for_founder_approval(self):
+        applicant_id = db.register_member(
+            "New Applicant", "0900000020", "NewApplicantPass88", 3
+        )
+        applicant = db.get_user_by_id(applicant_id)
+        self.assertEqual(applicant["role"], "member")
+        self.assertEqual(applicant["group_no"], 3)
+        self.assertEqual(applicant["registration_status"], "pending")
+        self.assertEqual(applicant["is_active"], 0)
+
+        visible = db.list_visible_accounts(self.founder)
+        pending = next(x for x in visible if x["id"] == applicant_id)
+        self.assertEqual(pending["registration_status"], "pending")
+
+        user, message = db.authenticate("0900000020", "NewApplicantPass88")
+        self.assertIsNone(user)
+        self.assertIn("chờ", message.lower())
+
+        with self.assertRaises(db.PermissionDenied):
+            db.approve_registration(self.teacher, applicant_id)
+
+        db.approve_registration(self.founder, applicant_id)
+        approved = db.get_user_by_id(applicant_id)
+        self.assertEqual(approved["registration_status"], "approved")
+        self.assertEqual(approved["is_active"], 1)
+
+        user, message = db.authenticate("0900000020", "NewApplicantPass88")
+        self.assertIsNotNone(user)
+        self.assertEqual(user["role"], "member")
+        self.assertEqual(user["group_no"], 3)
+
+    def test_rejected_self_registration_cannot_log_in(self):
+        applicant_id = db.register_member(
+            "Rejected Applicant", "0900000021", "RejectedApplicant88", 2
+        )
+        db.reject_registration(self.founder, applicant_id)
+        user, message = db.authenticate("0900000021", "RejectedApplicant88")
+        self.assertIsNone(user)
+        self.assertIn("chưa được chấp thuận", message.lower())
+        self.assertEqual(db.get_user_by_id(applicant_id)["registration_status"], "rejected")
+
+    def test_self_registration_cannot_reuse_an_existing_phone(self):
+        with self.assertRaises(db.ValidationError):
+            db.register_member("Duplicate Applicant", "0900000005", "AnotherPass88", 1)
+
+    def test_self_registration_requires_a_valid_group(self):
+        with self.assertRaises(db.ValidationError):
+            db.register_member("Invalid Group", "0900000022", "ValidPass88", 5)
+
     def test_phone_number_is_unique(self):
         with self.assertRaises(db.ValidationError):
             db.create_user(self.teacher, "Duplicate Person", "0900000005",

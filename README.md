@@ -17,6 +17,7 @@ Các giới hạn trên được kiểm tra ở tầng Python/SQLite mỗi lần
 
 - Mỗi tài khoản sử dụng một **số điện thoại duy nhất** để đăng nhập. Số điện thoại được chuẩn hóa và đặt ràng buộc `UNIQUE` trong cơ sở dữ liệu.
 - Mỗi lớp chỉ có một người sáng lập và một giáo viên chủ nhiệm đang hoạt động; mỗi tổ chỉ có một tổ trưởng đang hoạt động.
+- Đăng ký công khai chỉ tạo tài khoản Thành viên ở trạng thái chờ duyệt; người đăng ký không thể tự chọn quyền quản trị.
 - Không có mật khẩu mặc định được ghi trong mã nguồn hoặc GitHub.
 - Mật khẩu có độ dài tối thiểu 8 ký tự (tối đa 128 ký tự).
 - Mật khẩu được băm bằng **Argon2id**, không lưu dạng văn bản.
@@ -67,12 +68,12 @@ Có thể dùng script PowerShell:
 1. Mở website trực tiếp trên máy tính đang chạy ứng dụng tại `http://127.0.0.1:8080`. Lần tạo đầu tiên chỉ được phép từ kết nối cục bộ.
 2. Tạo tài khoản **Người sáng lập** bằng đúng ba trường: họ và tên, số điện thoại, mật khẩu.
 3. Đăng nhập bằng số điện thoại và mật khẩu vừa tạo.
-4. Trong mục **Tài khoản**, tạo tài khoản Giáo viên chủ nhiệm.
+4. Trong mục **Tài khoản**, Người sáng lập tạo tài khoản Giáo viên chủ nhiệm.
 5. Tạo lần lượt 4 tài khoản Tổ trưởng, mỗi tài khoản gắn đúng một tổ. Hệ thống từ chối tạo hai tổ trưởng đang hoạt động cho cùng một tổ.
-6. Mở mục **Các tổ**, chọn **Thêm thành viên** để tạo tài khoản. Mỗi tài khoản gồm họ và tên, số điện thoại, mật khẩu; người quản trị chọn thêm vai trò và tổ phù hợp.
-7. Gửi số điện thoại và mật khẩu riêng cho đúng người nhận. Không đăng mật khẩu trong nhóm chat chung.
+6. Sau khi website được đưa lên Internet, thành viên tự đăng ký bằng liên kết **Đăng ký tài khoản** trên màn hình đăng nhập. Người đăng ký nhập họ tên, số điện thoại, mật khẩu và tổ dự kiến; hệ thống luôn gán vai trò **Thành viên** và đặt trạng thái **Chờ duyệt**.
+7. Người sáng lập đối chiếu danh sách lớp, kiểm tra thông tin/tổ, sau đó duyệt hoặc từ chối trong mục **Tài khoản**. Chỉ sau khi được duyệt, thành viên mới đăng nhập được. Người sáng lập vẫn có thể tạo tài khoản thủ công khi cần.
 
-Không có nút quên mật khẩu. Khi thành viên hoặc tổ trưởng quên mật khẩu, họ cần liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm để được đặt lại. Người sáng lập và Giáo viên chủ nhiệm có thể đổi mật khẩu của chính mình.
+Không có nút quên mật khẩu. Khi thành viên hoặc tổ trưởng quên mật khẩu, họ cần liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm để được đặt lại. Người đăng ký tự nhập số điện thoại nhưng hệ thống chưa xác minh số đó bằng SMS; Người sáng lập cần đối chiếu danh sách lớp trước khi duyệt. Người sáng lập và Giáo viên chủ nhiệm có thể đổi mật khẩu của chính mình.
 
 Danh sách học sinh và tên thật chưa được tự điền sẵn vì người vận hành cần cung cấp danh sách chính xác. Bốn tổ 1–4 đã được tích hợp trong ứng dụng.
 

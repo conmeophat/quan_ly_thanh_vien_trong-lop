@@ -121,7 +121,45 @@ def render_login() -> None:
 
             password.on("keydown.enter", do_login)
             ui.button("Đăng nhập", on_click=do_login, icon="login").classes("w-full mt-2")
+            ui.link("Chưa có tài khoản? Đăng ký tại đây", "/register").classes("text-primary text-sm self-center")
             ui.label("Không có chức năng tự đặt lại mật khẩu. Hãy liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm.").classes("text-xs muted")
+
+
+def render_register() -> None:
+    with ui.column().classes("w-full min-h-screen items-center justify-center p-4"):
+        with ui.card().classes("soft-card w-full max-w-md p-7 gap-4"):
+            render_brand("Đăng ký thành viên lớp học")
+            ui.separator()
+            ui.label("Tạo tài khoản thành viên").classes("text-2xl font-bold").style("color:#172b4d")
+            ui.label("Điền thông tin của bạn. Tài khoản sẽ được kích hoạt sau khi Người sáng lập xác nhận.").classes("muted text-sm")
+            full_name = ui.input("Họ và tên", placeholder="Nhập họ và tên").classes("w-full")
+            phone = ui.input("Số điện thoại", placeholder="Số điện thoại dùng để đăng nhập").classes("w-full")
+            group_select = ui.select(
+                {1: "Tổ 1", 2: "Tổ 2", 3: "Tổ 3", 4: "Tổ 4"},
+                value=1, label="Tổ của bạn (có thể được điều chỉnh khi duyệt)"
+            ).classes("w-full")
+            password = ui.input("Mật khẩu", password=True, password_toggle_button=True).classes("w-full")
+            confirm_password = ui.input("Nhập lại mật khẩu", password=True, password_toggle_button=True).classes("w-full")
+            ui.label("Mật khẩu tối thiểu 8 ký tự. Số điện thoại chưa được xác minh qua SMS; Người sáng lập sẽ đối chiếu danh sách lớp.").classes("text-xs muted")
+
+            def submit_registration() -> None:
+                try:
+                    if password.value != confirm_password.value:
+                        raise ValidationError("Hai mật khẩu không trùng khớp.")
+                    db.register_member(
+                        full_name.value or "", phone.value or "",
+                        password.value or "", int(group_select.value)
+                    )
+                    ui.notify(
+                        "Đã gửi đăng ký. Bạn có thể đăng nhập sau khi Người sáng lập duyệt tài khoản.",
+                        type="positive", position="top"
+                    )
+                    ui.navigate.to("/")
+                except (ValidationError, PasswordPolicyError) as exc:
+                    notify_error(exc)
+
+            ui.button("Gửi đăng ký", on_click=submit_registration, icon="person_add").classes("w-full")
+            ui.link("Đã có tài khoản? Quay lại đăng nhập", "/").classes("text-primary text-sm self-center")
 
 
 def render_bootstrap() -> None:
@@ -521,6 +559,35 @@ def open_toggle_account_dialog(account: dict) -> None:
     dialog.open()
 
 
+
+def approve_pending_registration(account: dict) -> None:
+    try:
+        db.approve_registration(fresh_actor(), int(account["id"]))
+        notify_success("Đã duyệt tài khoản. Thành viên có thể đăng nhập.")
+        refresh_page()
+    except (ValidationError, PermissionDenied) as exc:
+        notify_error(exc)
+
+
+def reject_pending_registration(account: dict) -> None:
+    dialog = ui.dialog()
+    with dialog, ui.card().classes("p-4 gap-3"):
+        ui.label(f"Từ chối đăng ký của {account['full_name']}?").classes("font-semibold")
+        ui.label("Tài khoản này sẽ không thể đăng nhập bằng thông tin đã đăng ký.").classes("text-sm muted")
+        def execute() -> None:
+            try:
+                db.reject_registration(fresh_actor(), int(account["id"]))
+                dialog.close()
+                notify_success("Đã từ chối đăng ký.")
+                refresh_page()
+            except (ValidationError, PermissionDenied) as exc:
+                notify_error(exc)
+        with ui.row().classes("w-full justify-end"):
+            ui.button("Hủy", on_click=dialog.close, color="grey")
+            ui.button("Từ chối", on_click=execute, color="negative")
+    dialog.open()
+
+
 def render_account_management(actor: dict) -> None:
     actor = fresh_actor()
     accounts = db.list_visible_accounts(actor)
@@ -529,21 +596,33 @@ def render_account_management(actor: dict) -> None:
             with ui.column().classes("gap-0"):
                 ui.label("QUẢN LÝ TÀI KHOẢN").classes("section-title")
                 ui.label("Số điện thoại là thông tin đăng nhập và phải duy nhất trong hệ thống.").classes("text-sm muted")
-            ui.button("Tạo tài khoản", icon="person_add", on_click=lambda: open_create_user_dialog(fresh_actor()))
+            ui.button("Tạo tài khoản thủ công", icon="person_add", on_click=lambda: open_create_user_dialog(fresh_actor()))
         for account in accounts:
+            status = account.get("registration_status", "approved")
             with ui.row().classes("w-full items-center justify-between border-b border-gray-100 py-3 flex-wrap gap-2"):
                 with ui.column().classes("gap-0"):
                     ui.label(account["full_name"]).classes("font-semibold")
                     phone_label = account.get("phone") or "Chưa cập nhật số điện thoại"
                     ui.label(f"{phone_label} · {role_text(account)}").classes("text-xs muted")
                 with ui.row().classes("items-center gap-1"):
-                    ui.badge("Hoạt động" if account["is_active"] else "Đã khóa", color="positive" if account["is_active"] else "grey")
-                    if account["role"] != "founder":
-                        ui.button(icon="edit", on_click=lambda a=account: open_edit_account_dialog(a)).props("flat round dense").tooltip("Chỉnh sửa tài khoản")
-                        ui.button(icon="lock_reset", on_click=lambda a=account: open_admin_reset_dialog(fresh_actor(), a)).props("flat round dense").tooltip("Đặt lại mật khẩu")
-                        ui.button(icon="block" if account["is_active"] else "check_circle",
-                                  color="negative" if account["is_active"] else "positive",
-                                  on_click=lambda a=account: open_toggle_account_dialog(a)).props("flat round dense").tooltip("Khóa / mở khóa")
+                    if status == "pending":
+                        ui.badge("Chờ duyệt", color="warning")
+                        if actor["role"] == "founder":
+                            ui.button(icon="check_circle", color="positive",
+                                      on_click=lambda a=account: approve_pending_registration(a)).props("flat round dense").tooltip("Duyệt tài khoản")
+                            ui.button(icon="cancel", color="negative",
+                                      on_click=lambda a=account: reject_pending_registration(a)).props("flat round dense").tooltip("Từ chối đăng ký")
+                    elif status == "rejected":
+                        ui.badge("Đã từ chối", color="negative")
+                    else:
+                        ui.badge("Hoạt động" if account["is_active"] else "Đã khóa",
+                                 color="positive" if account["is_active"] else "grey")
+                        if account["role"] != "founder":
+                            ui.button(icon="edit", on_click=lambda a=account: open_edit_account_dialog(a)).props("flat round dense").tooltip("Chỉnh sửa tài khoản")
+                            ui.button(icon="lock_reset", on_click=lambda a=account: open_admin_reset_dialog(fresh_actor(), a)).props("flat round dense").tooltip("Đặt lại mật khẩu")
+                            ui.button(icon="block" if account["is_active"] else "check_circle",
+                                      color="negative" if account["is_active"] else "positive",
+                                      on_click=lambda a=account: open_toggle_account_dialog(a)).props("flat round dense").tooltip("Khóa / mở khóa")
 
 
 def render_audit_page(actor: dict) -> None:
@@ -664,6 +743,20 @@ def _is_local_bootstrap_request(request: Request) -> bool:
         return ipaddress.ip_address(client_host).is_loopback
     except ValueError:
         return client_host.lower() == "localhost"
+
+
+@ui.page("/register")
+def register_page() -> None:
+    ui.add_head_html(PAGE_STYLES)
+    db.init_db()
+    if db.founder_exists():
+        render_register()
+    else:
+        with ui.column().classes("w-full min-h-screen items-center justify-center p-6"):
+            with ui.card().classes("soft-card max-w-xl p-6"):
+                render_brand("Đăng ký thành viên")
+                ui.label("Hệ thống chưa được khởi tạo. Người sáng lập cần thiết lập tài khoản quản trị trước.").classes("text-sm muted")
+                ui.link("Quay lại trang chủ", "/")
 
 
 @ui.page("/")
