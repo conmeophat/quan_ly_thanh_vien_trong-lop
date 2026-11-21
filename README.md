@@ -112,8 +112,12 @@ run.ps1              # Khởi chạy từ PowerShell
 ```
 
 
-## 8. Triển khai công khai có HTTPS
+## 8. Triển khai Oracle Cloud Always Free
 
-Xem hướng dẫn triển khai Railway đầy đủ tại [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md). Hướng dẫn bao gồm thiết lập biến môi trường bí mật, gắn Volume tại `/data`, bật health check `/healthz`, tạo domain HTTPS và kiểm tra lại bốn vai trò trước khi dùng dữ liệu thật.
+Dự án đã chuẩn bị hướng dẫn và script triển khai trên Oracle Cloud Always Free: Ubuntu 24.04 ARM64, systemd auto-restart, Caddy HTTPS, DuckDNS miễn phí, ổ dữ liệu bền vững, sao lưu SQLite hằng ngày được age-encrypt và gửi sang OCI Object Storage.
 
-**Không đưa `.env`, mật khẩu, mã thiết lập hoặc file SQLite lên GitHub.** Chỉ chạy một replica khi dùng SQLite.
+Bắt đầu tại [deploy/oracle/README.md](deploy/oracle/README.md). Các script cài đặt nằm trong [deploy/oracle](deploy/oracle/).
+
+**Giới hạn quan trọng:** Oracle có thể thu hồi máy ảo Always Free bị coi là idle theo ngưỡng sử dụng trong 7 ngày. Kiến trúc một VM không có failover/SLA 24/7; backup cùng tenancy không bảo vệ nếu toàn bộ tài khoản OCI bị mất. Do đó 0 đồng là mục tiêu theo hạn mức, không phải cam kết uptime hoặc lưu trữ vĩnh viễn.
+
+**Không đưa .env, app.env, token DuckDNS, mật khẩu, khóa age riêng hoặc file SQLite lên GitHub.** Chỉ chạy một tiến trình ứng dụng ghi vào SQLite.
