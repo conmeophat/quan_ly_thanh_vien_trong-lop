@@ -65,6 +65,8 @@ def init_db() -> None:
                 role TEXT NOT NULL CHECK(role IN ('founder','teacher','leader','member')),
                 group_no INTEGER,
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
+                registration_status TEXT NOT NULL DEFAULT 'approved'
+                    CHECK(registration_status IN ('pending','approved','rejected')),
                 session_version INTEGER NOT NULL DEFAULT 0 CHECK(session_version >= 0),
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 CHECK (
@@ -130,6 +132,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0")
         if "phone" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN phone TEXT COLLATE NOCASE")
+        if "registration_status" not in user_columns:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN registration_status TEXT NOT NULL DEFAULT 'approved' "
+                "CHECK(registration_status IN ('pending','approved','rejected'))"
+            )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique "
             "ON users(phone) WHERE phone IS NOT NULL"
@@ -197,6 +204,32 @@ def create_founder(full_name: str, phone: str, password: str, *,
         return user_id
 
 
+
+def register_member(full_name: str, phone: str, password: str, group_no: int) -> int:
+    """Public self-registration; accounts remain inactive until the founder approves them."""
+    full_name, phone = _validate_identity(full_name, phone)
+    if group_no not in GROUPS:
+        raise ValidationError("Vui lòng chọn tổ từ 1 đến 4.")
+    password_hash = hash_password(password)
+    legacy_person_code, legacy_username = _legacy_identity_values()
+    with connection() as conn:
+        try:
+            cursor = conn.execute(
+                "INSERT INTO users(person_code, username, phone, full_name, password_hash, "
+                "role, group_no, is_active, registration_status) "
+                "VALUES(?,?,?,?,?,'member',?,0,'pending')",
+                (legacy_person_code, legacy_username, phone, full_name, password_hash, group_no),
+            )
+        except sqlite3.IntegrityError as exc:
+            if "phone" in str(exc).lower():
+                raise ValidationError("Số điện thoại này đã được đăng ký.") from exc
+            raise ValidationError("Không thể gửi đăng ký do dữ liệu không hợp lệ.") from exc
+        user_id = int(cursor.lastrowid)
+        _audit(conn, None, "self_registration", user_id,
+               f"Đăng ký thành viên chờ duyệt; tổ dự kiến={group_no}")
+        return user_id
+
+
 def _validate_identity(full_name: str, phone: str) -> tuple[str, str]:
     full_name = (full_name or "").strip()
     phone = (phone or "").strip()
@@ -225,11 +258,18 @@ def authenticate(phone: str, password: str) -> tuple[dict[str, Any] | None, str]
 
         row = conn.execute(
             "SELECT * FROM users WHERE (phone=? COLLATE NOCASE OR "
-            "(phone IS NULL AND username=? COLLATE NOCASE)) AND is_active=1 LIMIT 1",
+            "(phone IS NULL AND username=? COLLATE NOCASE)) LIMIT 1",
             (normalized_phone, login_value),
         ).fetchone()
         valid = bool(row and verify_password(row["password_hash"], password or ""))
         if valid:
+            status = row["registration_status"]
+            if status == "pending":
+                return None, "Đăng ký đã được gửi. Vui lòng chờ Người sáng lập duyệt tài khoản."
+            if status == "rejected":
+                return None, "Đăng ký chưa được chấp thuận. Vui lòng liên hệ Người sáng lập."
+            if not row["is_active"]:
+                return None, "Tài khoản đã bị khóa. Vui lòng liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm."
             conn.execute("DELETE FROM login_throttle WHERE username_key=?", (key,))
             return _user_dict(row), ""
 
@@ -319,28 +359,71 @@ def create_user(actor: dict[str, Any], full_name: str, phone: str,
         return user_id
 
 
+
+def approve_registration(actor: dict[str, Any], target_id: int) -> None:
+    """Only the founder can activate a self-registered member."""
+    actor = _refresh_actor(actor)
+    _check_actor(actor, ("founder",))
+    with connection() as conn:
+        target = conn.execute(
+            "SELECT id, role, registration_status FROM users WHERE id=?", (target_id,)
+        ).fetchone()
+        if not target or target["role"] != "member":
+            raise ValidationError("Không tìm thấy hồ sơ đăng ký thành viên.")
+        if target["registration_status"] != "pending":
+            raise ValidationError("Hồ sơ này không còn ở trạng thái chờ duyệt.")
+        conn.execute(
+            "UPDATE users SET registration_status='approved', is_active=1, "
+            "session_version=session_version+1 WHERE id=?",
+            (target_id,),
+        )
+        _audit(conn, int(actor["id"]), "approve_registration", target_id,
+               "Người sáng lập đã duyệt đăng ký thành viên")
+
+
+def reject_registration(actor: dict[str, Any], target_id: int) -> None:
+    """Reject a pending registration without granting any account access."""
+    actor = _refresh_actor(actor)
+    _check_actor(actor, ("founder",))
+    with connection() as conn:
+        target = conn.execute(
+            "SELECT id, role, registration_status FROM users WHERE id=?", (target_id,)
+        ).fetchone()
+        if not target or target["role"] != "member":
+            raise ValidationError("Không tìm thấy hồ sơ đăng ký thành viên.")
+        if target["registration_status"] != "pending":
+            raise ValidationError("Hồ sơ này không còn ở trạng thái chờ duyệt.")
+        conn.execute(
+            "UPDATE users SET registration_status='rejected', is_active=0, "
+            "session_version=session_version+1 WHERE id=?",
+            (target_id,),
+        )
+        _audit(conn, int(actor["id"]), "reject_registration", target_id,
+               "Người sáng lập đã từ chối đăng ký thành viên")
+
+
 def list_visible_accounts(actor: dict[str, Any], group_no: int | None = None) -> list[dict[str, Any]]:
     actor = _refresh_actor(actor)
     role = actor.get("role")
     with connection() as conn:
         if role == "founder":
-            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, registration_status, created_at FROM users"
             params: tuple[Any, ...] = ()
             if group_no in GROUPS:
                 sql += " WHERE group_no=?"
                 params = (group_no,)
         elif role == "teacher":
-            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users WHERE role IN ('leader','member')"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, registration_status, created_at FROM users WHERE role IN ('leader','member')"
             params = ()
             if group_no in GROUPS:
                 sql += " AND group_no=?"
                 params = (group_no,)
         elif role == "leader":
             # Strictly limited to the leader's own group; never returns other groups' accounts.
-            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users WHERE role='member' AND group_no=?"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, registration_status, created_at FROM users WHERE role='member' AND group_no=?"
             params = (int(actor["group_no"]),)
         else:
-            sql = "SELECT id, phone, full_name, role, group_no, is_active, created_at FROM users WHERE id=?"
+            sql = "SELECT id, phone, full_name, role, group_no, is_active, registration_status, created_at FROM users WHERE id=?"
             params = (int(actor["id"]),)
         rows = conn.execute(sql + " ORDER BY group_no, role, full_name", params).fetchall()
         return [dict(row) for row in rows]
