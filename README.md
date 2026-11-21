@@ -138,3 +138,18 @@ Bắt đầu tại [deploy/oracle/README.md](deploy/oracle/README.md). Các scri
 **Giới hạn quan trọng:** Oracle có thể thu hồi máy ảo Always Free bị coi là idle; nhà cung cấp lưu trữ có thể thay đổi quota/chính sách; VM mới có thể không còn capacity. Một VM không có failover/SLA 24/7. Các lớp backup giúp giảm nguy cơ mất dữ liệu và dựng lại hệ thống, nhưng không bảo đảm uptime tuyệt đối hay lưu trữ vĩnh viễn. Dịch vụ lưu trữ thứ hai cần được cấu hình trong tài khoản riêng và vẫn chịu giới hạn của nhà cung cấp đó.
 
 **Không đưa .env, app.env, token DuckDNS, mật khẩu, khóa age riêng, token rclone hoặc file SQLite plaintext lên GitHub.** Chỉ chạy một tiến trình ứng dụng ghi vào SQLite. Giữ khóa age riêng và recipient công khai ở ít nhất hai nơi ngoại tuyến an toàn; nếu mất khóa riêng, các bản backup mã hóa không thể giải mã.
+
+
+## 10. Máy Windows dự phòng tại nhà
+
+Đã bổ sung quy trình cold standby: đồng bộ bản backup mã hóa từ kho rclone độc lập về Windows hằng ngày, kiểm tra SHA-256, giải mã bằng age, kiểm tra SQLite và phục hồi database. Xem [hướng dẫn Windows standby](deploy/windows-standby/README_VI.md).
+
+Các script có trong thư mục deploy/windows-standby:
+- setup_standby.ps1: cài môi trường Python riêng, tạo .env an toàn nếu chưa có.
+- sync_backup.ps1: tải backup mới nhất và kiểm tra checksum.
+- register_backup_sync_task.ps1: tạo tác vụ Windows đồng bộ hằng ngày.
+- restore_latest.ps1 và sqlite_tools.py: giải mã, kiểm tra và snapshot trước khi phục hồi.
+- run_standby.ps1: chạy website local.
+- update_duckdns.ps1 và run_public_standby.ps1: cập nhật DNS và bật HTTPS khi chuyển thủ công sang máy nhà.
+
+Đây là dự phòng thủ công, không phải failover tự động. Muốn người dùng bên ngoài truy cập khi chuyển sang máy nhà cần public IPv4 + port forwarding, hoặc một Cloudflare Tunnel với domain được quản lý trên Cloudflare. Không chạy đồng thời hai máy cho phép người dùng ghi dữ liệu.
