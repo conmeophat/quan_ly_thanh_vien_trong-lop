@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 if [[ "$EUID" -ne 0 ]]; then echo "Run with sudo."; exit 1; fi
-if [[ $# -ne 2 || ! -f "$1" || ! -f "$2" ]]; then
+if (( $# != 2 )); then
   echo "Usage: sudo bash deploy/oracle/restore.sh BACKUP.sqlite3.gz.age AGE-IDENTITY.txt"
+  exit 1
+fi
+if [[ ! -f "$1" || ! -f "$2" ]]; then
+  echo "Backup or age identity file does not exist."
   exit 1
 fi
 ENCRYPTED="$1"
