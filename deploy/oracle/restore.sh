@@ -102,7 +102,14 @@ PY
   fi
 fi
 
-install -o classmerit -g classmerit -m 0640 "$WORK/restored.sqlite3" "$DATABASE_PATH"
+if ! install -o classmerit -g classmerit -m 0640 "$WORK/restored.sqlite3" "$DATABASE_PATH"; then
+  echo "Could not install the restored database."
+  if [[ -n "$PREVIOUS_DATABASE" && -f "$PREVIOUS_DATABASE" ]]; then
+    install -o classmerit -g classmerit -m 0640 "$PREVIOUS_DATABASE" "$DATABASE_PATH"
+  fi
+  systemctl start class-merit-hub || true
+  exit 1
+fi
 rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm"
 systemctl start class-merit-hub
 sleep 5
