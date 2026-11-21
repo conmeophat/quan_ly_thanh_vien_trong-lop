@@ -70,10 +70,11 @@ read -r -p "This replaces the live database at $DATABASE_PATH. Type RESTORE to c
 if [[ "$CONFIRM" != "RESTORE" ]]; then echo "Cancelled."; exit 1; fi
 mkdir -p "$(dirname "$DATABASE_PATH")"
 PREVIOUS_DATABASE=""
+systemctl stop class-merit-hub
 if [[ -f "$DATABASE_PATH" ]]; then
   PREVIOUS_DATABASE="$DATABASE_PATH.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
-  # Use SQLite's online backup API so the snapshot includes committed WAL data.
-  python3 - "$DATABASE_PATH" "$PREVIOUS_DATABASE" <<'PY'
+  # With the application stopped, SQLite's online backup captures committed WAL data consistently.
+  if ! python3 - "$DATABASE_PATH" "$PREVIOUS_DATABASE" <<'PY'
 import sqlite3
 import sys
 
@@ -89,11 +90,18 @@ finally:
     destination.close()
     source.close()
 PY
-  chown classmerit:classmerit "$PREVIOUS_DATABASE"
-  chmod 0640 "$PREVIOUS_DATABASE"
+  then
+    systemctl start class-merit-hub || true
+    echo "Could not create a valid pre-restore snapshot; the original app was restarted." >&2
+    exit 1
+  fi
+  if ! chown classmerit:classmerit "$PREVIOUS_DATABASE" || ! chmod 0640 "$PREVIOUS_DATABASE"; then
+    systemctl start class-merit-hub || true
+    echo "Could not protect the pre-restore snapshot; the original app was restarted." >&2
+    exit 1
+  fi
 fi
 
-systemctl stop class-merit-hub
 install -o classmerit -g classmerit -m 0640 "$WORK/restored.sqlite3" "$DATABASE_PATH"
 rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm"
 systemctl start class-merit-hub
