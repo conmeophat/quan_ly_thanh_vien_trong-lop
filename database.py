@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
 
-from security import hash_password, verify_password, verify_bootstrap_token
+from security import hash_password, verify_password
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("DATABASE_PATH", str(BASE_DIR / "data" / "class_tracker.sqlite3")))
@@ -170,6 +170,11 @@ def _legacy_identity_values() -> tuple[str, str]:
     return secrets.token_hex(16), secrets.token_hex(16)
 
 
+def _legacy_identity_values() -> tuple[str, str]:
+    """Fill legacy NOT NULL columns for databases created by older releases."""
+    return secrets.token_hex(16), secrets.token_hex(16)
+
+
 def create_founder(full_name: str, phone: str, password: str, *,
                    local_setup_allowed: bool = False) -> int:
     if not local_setup_allowed:
@@ -202,19 +207,6 @@ def _validate_identity(full_name: str, phone: str) -> tuple[str, str]:
     if not digits.isdigit() or not 9 <= len(digits) <= 15:
         raise ValidationError("Số điện thoại phải có từ 9 đến 15 chữ số; dấu + chỉ được đặt ở đầu.")
     return full_name, phone
-
-
-def _validate_identity(full_name: str, username: str, person_code: str) -> tuple[str, str, str]:
-    full_name = (full_name or "").strip()
-    username = (username or "").strip()
-    person_code = (person_code or "").strip()
-    if not 2 <= len(full_name) <= 100:
-        raise ValidationError("Họ và tên phải có từ 2 đến 100 ký tự.")
-    if not 4 <= len(username) <= 32 or not all(ch.isalnum() or ch in "._-" for ch in username):
-        raise ValidationError("Tên đăng nhập cần 4–32 ký tự; chỉ dùng chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.")
-    if not 3 <= len(person_code) <= 40:
-        raise ValidationError("Mã định danh cá nhân phải có từ 3 đến 40 ký tự.")
-    return full_name, username, person_code
 
 
 def authenticate(phone: str, password: str) -> tuple[dict[str, Any] | None, str]:
