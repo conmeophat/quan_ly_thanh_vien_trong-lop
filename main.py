@@ -37,7 +37,13 @@ PAGE_STYLES = """
   .score-positive { color: #15803d; font-weight: 700; }
   .score-negative { color: #b91c1c; font-weight: 700; }
   .q-tab { font-weight: 600; }
-  @media (max-width: 640px) { .app-shell { padding: 12px !important; } }
+  @media (max-width: 640px) {
+    .app-shell { padding: 12px !important; }
+    .app-shell .nicegui-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .app-shell .q-tabs__content { overflow-x: auto; }
+    .app-shell .q-tab { min-width: max-content; padding-inline: 10px; }
+    .app-shell .soft-card { max-width: 100%; }
+  }
 </style>
 """
 
