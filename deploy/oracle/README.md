@@ -295,7 +295,7 @@ sudo bash /opt/class-merit-hub/deploy/oracle/restore.sh /tmp/class-merit-restore
 
 Sau khi xác nhận ứng dụng đã khôi phục bình thường, xóa bản khóa riêng tạm trên VM bằng shred.
 
-Script giải mã, kiểm tra gzip, SQLite integrity và bảng bắt buộc trước khi hỏi xác nhận. File database cũ được giữ lại với hậu tố pre-restore. Sau khôi phục, kiểm tra health check, đăng nhập và hồ sơ điểm.
+Script kiểm tra checksum nếu có sidecar, giải mã, kiểm tra gzip, SQLite integrity và bảng bắt buộc trước khi hỏi xác nhận. Trước khi thay database, script dừng ứng dụng và tạo một bản snapshot SQLite online nhất quán (bao gồm WAL). Nếu health check sau restore thất bại, script thử quay lại snapshot trước đó. File database trước restore được giữ lại với hậu tố pre-restore khi restore thành công. Sau khôi phục, kiểm tra health check, đăng nhập và hồ sơ điểm.
 
 Điểm quan trọng cho tình huống VM cũ đã mất: `restore.sh` có thể chạy ngay sau khi cài ứng dụng mới, kể cả khi `backup.env` chưa được tạo. Chỉ cần `app.env` đã có DATABASE_PATH, file backup mã hóa và khóa riêng tương ứng. Không cần chạy cấu hình backup trước bước restore.
 
@@ -305,7 +305,7 @@ Script giải mã, kiểm tra gzip, SQLite integrity và bảng bắt buộc tr�
 sudo bash /opt/class-merit-hub/deploy/oracle/update.sh
 ~~~
 
-Script sẽ tạo backup trước (nếu đã cấu hình), kéo mã nguồn mới, cài dependencies, khởi động lại service và gọi health check.
+Script sẽ tạo backup trước (nếu đã cấu hình), kéo mã nguồn mới, cài dependencies, tự cập nhật các lệnh backup/verify trong `/usr/local/sbin`, khởi động lại service và gọi health check.
 
 Trạng thái dịch vụ và watchdog:
 
