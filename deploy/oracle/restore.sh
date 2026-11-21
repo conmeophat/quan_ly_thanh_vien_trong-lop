@@ -9,9 +9,28 @@ if [[ ! -f "$1" || ! -f "$2" ]]; then
   echo "Backup or age identity file does not exist."
   exit 1
 fi
+
 ENCRYPTED="$1"
 IDENTITY="$2"
-source /etc/class-merit-hub/backup.env
+CONFIG=/etc/class-merit-hub/backup.env
+APP_ENV=/etc/class-merit-hub/app.env
+DATABASE_PATH=""
+
+# A disaster-recovery VM may not have backup.env yet. The application database
+# path is sufficient for a one-time restore; backup upload can be configured later.
+if [[ -f "$CONFIG" ]]; then
+  source "$CONFIG"
+elif [[ -f "$APP_ENV" ]]; then
+  DATABASE_PATH="$(grep '^DATABASE_PATH=' "$APP_ENV" | tail -n 1 | cut -d= -f2-)"
+else
+  echo "Neither backup.env nor app.env exists; install the application first." >&2
+  exit 1
+fi
+if [[ -z "$DATABASE_PATH" ]]; then
+  echo "DATABASE_PATH is missing from the application configuration." >&2
+  exit 1
+fi
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 chmod 0700 "$WORK"
@@ -34,12 +53,14 @@ finally:
     db.close()
 PY
 
-echo "Restore file passed validation."
-read -r -p "This replaces the live database. Type RESTORE to continue: " CONFIRM
+echo "Restore file passed decryption, gzip, SQLite and schema validation."
+read -r -p "This replaces the live database at $DATABASE_PATH. Type RESTORE to continue: " CONFIRM
 if [[ "$CONFIRM" != "RESTORE" ]]; then echo "Cancelled."; exit 1; fi
 systemctl stop class-merit-hub
 mkdir -p "$(dirname "$DATABASE_PATH")"
-if [[ -f "$DATABASE_PATH" ]]; then cp -a "$DATABASE_PATH" "$DATABASE_PATH.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"; fi
+if [[ -f "$DATABASE_PATH" ]]; then
+  cp -a "$DATABASE_PATH" "$DATABASE_PATH.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+fi
 install -o classmerit -g classmerit -m 0640 "$WORK/restored.sqlite3" "$DATABASE_PATH"
 rm -f "$DATABASE_PATH-wal" "$DATABASE_PATH-shm"
 systemctl start class-merit-hub
