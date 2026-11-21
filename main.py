@@ -18,7 +18,7 @@ load_dotenv(BASE_DIR / ".env")
 STORAGE_SECRET = os.getenv("NICEGUI_STORAGE_SECRET", "")
 BOOTSTRAP_TOKEN = os.getenv("BOOTSTRAP_TOKEN", "")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
-HOST = os.getenv("HOST", "127.0.0.1")
+HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8080"))
 
 if len(STORAGE_SECRET) < 32:
@@ -40,6 +40,12 @@ PAGE_STYLES = """
   @media (max-width: 640px) { .app-shell { padding: 12px !important; } }
 </style>
 """
+
+
+@app.get("/healthz")
+def healthz() -> dict[str, str]:
+    """Health check endpoint without exposing user or database information."""
+    return {"status": "ok"}
 
 
 def notify_error(error: Exception | str) -> None:
