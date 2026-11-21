@@ -17,7 +17,7 @@ NAMESPACE="$(oci os ns get --auth instance_principal --query data --raw-output)"
 if [[ -z "$NAMESPACE" ]]; then echo "Cannot read Object Storage namespace; check IAM policy."; exit 1; fi
 read -r -p "Existing private Object Storage bucket name: " BUCKET
 if [[ ! "$BUCKET" =~ ^[a-zA-Z0-9._-]{1,256}$ ]]; then echo "Invalid bucket name."; exit 1; fi
-oci os bucket get --auth instance_principal --namespace-name "$NAMESPACE" --bucket-name "$BUCKET" >/dev/null
+oci os object list --auth instance_principal --namespace-name "$NAMESPACE" --bucket-name "$BUCKET" --limit 1 >/dev/null
 
 APP_ENV=/etc/class-merit-hub/app.env
 DB_PATH="$(grep '^DATABASE_PATH=' "$APP_ENV" | tail -n1 | cut -d= -f2-)"
