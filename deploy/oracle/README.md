@@ -321,9 +321,25 @@ sudo journalctl -u class-merit-hub -f
 Quy trình này phục hồi ứng dụng trên VM mới, không cần lấy lại VM cũ:
 
 1. Tạo VM Always Free mới trong home region nếu OCI vẫn cấp được capacity. Tạo lại VCN/Network Security Group và mở đúng TCP 22, 80, 443.
-2. Nếu dùng OCI Object Storage, cập nhật Dynamic Group matching rule để bao gồm **OCID instance mới**; giữ policy chỉ cho phép ghi/đọc bucket backup cần thiết. Nếu dùng kho rclone độc lập, cấu hình lại remote trên VM mới.
+2. Nếu dùng OCI Object Storage, cập nhật Dynamic Group matching rule để bao gồm **OCID instance mới**; giữ policy chỉ cho phép ghi/đọc bucket backup cần thiết. Nếu dùng kho rclone độc lập, cài và cấu hình lại remote trên VM mới:
+
+~~~bash
+sudo apt-get update
+sudo apt-get install -y rclone
+sudo rclone config
+~~~
+
+Cấu hình remote bằng đúng tài khoản lưu trữ thứ hai. File cấu hình root-owned sẽ nằm trong `/root/.config/rclone/rclone.conf`; không đưa file này lên GitHub.
 3. Cài Ubuntu 24.04, clone repository và chạy `install_ubuntu.sh`. Nhập lại DuckDNS subdomain/token; kiểm tra DuckDNS phân giải về IP mới. Chưa tạo tài khoản founder trước khi restore.
-4. Lấy file backup mã hóa mới nhất từ OCI Console/CLI hoặc kho rclone thứ hai. Cũng có thể dùng một bản đã lưu ngoại tuyến trên máy tính cá nhân.
+4. Lấy file backup mã hóa mới nhất từ OCI Console/CLI hoặc kho rclone thứ hai. Với rclone, liệt kê file rồi tải đúng file mới nhất (thay REMOTE và FILENAME bằng giá trị thực tế):
+
+~~~bash
+sudo rclone lsf --files-only REMOTE
+sudo rclone copyto REMOTE/FILENAME /tmp/FILENAME
+sudo rclone copyto REMOTE/FILENAME.sha256 /tmp/FILENAME.sha256
+~~~
+
+Cũng có thể dùng một bản đã lưu ngoại tuyến trên máy tính cá nhân.
 5. Chép khóa riêng age từ bản ngoại tuyến lên VM mới qua SCP. Đưa file backup vào VM, sau đó giải mã/khôi phục bằng lệnh bên dưới. `restore.sh` không cần `backup.env` ở bước này.
 
 ~~~bash
