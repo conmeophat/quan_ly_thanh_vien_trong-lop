@@ -194,7 +194,7 @@ findtime = 10m
 bantime = 1h
 EOF
 systemctl enable --now fail2ban
-systemctl enable --now unattended-upgrades
+systemctl enable --now apt-daily-upgrade.timer
 
 echo "[8/8] Starting services..."
 systemctl daemon-reload
