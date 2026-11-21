@@ -9,22 +9,22 @@
 | Người sáng lập | Toàn bộ lớp và cả bốn tổ | Quyền cao nhất: tạo/chỉnh sửa tài khoản, quản lý tổ, điểm, nhận xét, khóa/mở tài khoản và xem nhật ký |
 | Giáo viên chủ nhiệm | Toàn bộ lớp và cả bốn tổ | Quản lý thành viên, tổ trưởng, điểm và nhận xét; không quản lý tài khoản người sáng lập hoặc tài khoản giáo viên khác |
 | Tổ trưởng | Chỉ tổ được phân công | Xem danh sách và hồ sơ thi đua của thành viên trong tổ; thêm thành viên; cộng/trừ, sửa/xóa điểm và nhận xét trong tổ mình |
-| Thành viên | Chỉ tài khoản của chính mình | Chỉ xem điểm và nhận xét của bản thân; được tự đổi mật khẩu |
+| Thành viên | Chỉ tài khoản của chính mình | Chỉ xem điểm và nhận xét của bản thân; không có quyền đổi hoặc đặt lại mật khẩu |
 
-Các giới hạn trên được kiểm tra ở tầng Python/SQLite mỗi lần truy vấn hoặc thay đổi dữ liệu. Việc thay đổi mã tổ hoặc ID trong trình duyệt không cấp thêm quyền. Tổ trưởng Tổ 2 không thể lấy danh sách, điểm hoặc nhận xét của Tổ 1, 3 hay 4.
+Các giới hạn trên được kiểm tra ở tầng Python/SQLite mỗi lần truy vấn hoặc thay đổi dữ liệu. Việc thay đổi mã tổ hoặc ID trong trình duyệt không cấp thêm quyền. Tổ trưởng Tổ 2 không thể lấy danh sách, điểm hoặc nhận xét của Tổ 1, 3 hay 4. Chỉ Người sáng lập và Giáo viên chủ nhiệm được đổi mật khẩu của chính mình hoặc đặt lại mật khẩu cho tài khoản thuộc phạm vi quản lý; Tổ trưởng và Thành viên không có chức năng này.
 
 ## 2. Quy tắc tài khoản và mật khẩu
 
-- Mỗi người cần một **mã định danh cá nhân duy nhất** (ví dụ mã học sinh). Cơ sở dữ liệu đặt ràng buộc `UNIQUE` cho cả mã định danh và tên đăng nhập để ngăn cấp trùng tài khoản.
+- Mỗi tài khoản sử dụng một **số điện thoại duy nhất** để đăng nhập. Số điện thoại được chuẩn hóa và đặt ràng buộc `UNIQUE` trong cơ sở dữ liệu.
 - Mỗi lớp chỉ có một người sáng lập và một giáo viên chủ nhiệm đang hoạt động; mỗi tổ chỉ có một tổ trưởng đang hoạt động.
 - Không có mật khẩu mặc định được ghi trong mã nguồn hoặc GitHub.
-- Mật khẩu dài tối thiểu 14 ký tự, phải có chữ hoa, chữ thường, chữ số và ký tự đặc biệt; mật khẩu không được chứa tên đăng nhập.
+- Mật khẩu có độ dài tối thiểu 8 ký tự (tối đa 128 ký tự).
 - Mật khẩu được băm bằng **Argon2id**, không lưu dạng văn bản.
 - Sau 5 lần đăng nhập sai liên tiếp, tài khoản bị khóa đăng nhập tạm thời 15 phút.
 - Phiên đăng nhập hết hạn sau 8 giờ. Đổi mật khẩu, khóa tài khoản hoặc thay đổi vai trò sẽ thu hồi các phiên cũ của tài khoản đó.
 - Các thao tác quản trị quan trọng được ghi vào nhật ký.
 
-> Mã định danh cá nhân là khóa để phát hiện một người bị tạo nhiều tài khoản. Người sáng lập/giáo viên cần nhập cùng một mã cho cùng một học sinh, không tự ý đổi mã để tạo tài khoản thứ hai.
+> Một số điện thoại chỉ được gắn với một tài khoản. Người tạo tài khoản cần kiểm tra số điện thoại chính xác trước khi lưu.
 
 ## 3. Cài đặt trên Windows / PowerShell
 
@@ -40,14 +40,13 @@ py -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Tạo **hai chuỗi bí mật khác nhau**. Mỗi lần chạy lệnh sẽ tạo một chuỗi ngẫu nhiên mới:
+Tạo một khóa bí mật cho phiên đăng nhập:
 
 ```powershell
 py -c "import secrets; print(secrets.token_urlsafe(48))"
-py -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Mở file `.env`, thay `NICEGUI_STORAGE_SECRET` bằng chuỗi thứ nhất và `BOOTSTRAP_TOKEN` bằng chuỗi thứ hai. Không gửi hai chuỗi này lên GitHub hoặc cho người khác.
+Mở file `.env` và thay giá trị `NICEGUI_STORAGE_SECRET` bằng chuỗi vừa tạo. Không gửi khóa này lên GitHub hoặc cho người khác. Không cần cấu hình mã thiết lập riêng.
 
 Chạy website:
 
@@ -65,12 +64,15 @@ Có thể dùng script PowerShell:
 
 ## 4. Thiết lập tài khoản lần đầu
 
-1. Ở màn hình thiết lập, tạo tài khoản **Người sáng lập**. Nhập đúng `BOOTSTRAP_TOKEN` trong file `.env`; bước này chỉ thực hiện được một lần.
-2. Đăng nhập bằng tài khoản người sáng lập.
-3. Trong mục **Tài khoản**, tạo tài khoản Giáo viên chủ nhiệm.
-4. Tạo lần lượt 4 tài khoản Tổ trưởng, mỗi tài khoản gắn đúng một tổ. Hệ thống từ chối tạo hai tổ trưởng đang hoạt động cho cùng một tổ.
-5. Mở mục **Các tổ**, chọn **Thêm thành viên** trong từng tổ để tạo tài khoản cho học sinh. Điền mã định danh riêng, tên đăng nhập và mật khẩu khởi tạo mạnh.
-6. Gửi tên đăng nhập và mật khẩu riêng cho đúng người nhận. Không đăng mật khẩu trong nhóm chat chung.
+1. Mở website trực tiếp trên máy tính đang chạy ứng dụng tại `http://127.0.0.1:8080`. Lần tạo đầu tiên chỉ được phép từ kết nối cục bộ.
+2. Tạo tài khoản **Người sáng lập** bằng đúng ba trường: họ và tên, số điện thoại, mật khẩu.
+3. Đăng nhập bằng số điện thoại và mật khẩu vừa tạo.
+4. Trong mục **Tài khoản**, tạo tài khoản Giáo viên chủ nhiệm.
+5. Tạo lần lượt 4 tài khoản Tổ trưởng, mỗi tài khoản gắn đúng một tổ. Hệ thống từ chối tạo hai tổ trưởng đang hoạt động cho cùng một tổ.
+6. Mở mục **Các tổ**, chọn **Thêm thành viên** để tạo tài khoản. Mỗi tài khoản gồm họ và tên, số điện thoại, mật khẩu; người quản trị chọn thêm vai trò và tổ phù hợp.
+7. Gửi số điện thoại và mật khẩu riêng cho đúng người nhận. Không đăng mật khẩu trong nhóm chat chung.
+
+Không có nút quên mật khẩu. Khi thành viên hoặc tổ trưởng quên mật khẩu, họ cần liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm để được đặt lại. Người sáng lập và Giáo viên chủ nhiệm có thể đổi mật khẩu của chính mình.
 
 Danh sách học sinh và tên thật chưa được tự điền sẵn vì người vận hành cần cung cấp danh sách chính xác. Bốn tổ 1–4 đã được tích hợp trong ứng dụng.
 
@@ -104,10 +106,10 @@ Bộ kiểm thử bao gồm quyền xem dữ liệu giữa các tổ, giới h�
 ```text
 main.py              # Giao diện NiceGUI và luồng đăng nhập
 database.py          # SQLite, dữ liệu, kiểm tra quyền ở máy chủ
-security.py          # Argon2id, chính sách mật khẩu, mã thiết lập
+security.py          # Argon2id và chính sách mật khẩu
 test_permissions.py  # Kiểm thử quyền truy cập
 requirements.txt     # Thư viện cần cài
-.env.example         # Mẫu cấu hình bí mật (không chứa bí mật thật)
+.env.example         # Mẫu cấu hình khóa phiên (không chứa bí mật thật)
 run.ps1              # Khởi chạy từ PowerShell
 ```
 
