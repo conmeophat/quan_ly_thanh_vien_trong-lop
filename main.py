@@ -612,7 +612,6 @@ def render_account_management(actor: dict) -> None:
                                       on_click=lambda a=account: approve_pending_registration(a)).props("flat round dense").tooltip("Duyệt tài khoản")
                             ui.button(icon="cancel", color="negative",
                                       on_click=lambda a=account: reject_pending_registration(a)).props("flat round dense").tooltip("Từ chối đăng ký")
-                            ui.button(icon="edit", on_click=lambda a=account: open_edit_account_dialog(a)).props("flat round dense").tooltip("Kiểm tra / chỉnh sửa thông tin")
                     elif status == "rejected":
                         ui.badge("Đã từ chối", color="negative")
                     else:
