@@ -1,4 +1,4 @@
-name: Python tests
+name: Python and deployment tests
 
 on:
   push:
@@ -16,5 +16,9 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+      - name: Compile Python sources
+        run: python -m compileall -q main.py database.py security.py test_permissions.py
+      - name: Validate shell deployment scripts
+        run: find deploy/oracle -name '*.sh' -print0 | xargs -0 -n1 bash -n
       - name: Run permission tests
         run: python -m unittest -v
