@@ -115,6 +115,28 @@ UMask=0027
 WantedBy=multi-user.target
 EOF
 
+install -m 0750 -o root -g root "$APP_DIR/deploy/oracle/healthcheck.sh" /usr/local/sbin/class-merit-healthcheck
+
+cat > /etc/systemd/system/class-merit-healthcheck.service <<'EOF'
+[Unit]
+Description=Class Merit Hub local health watchdog
+After=class-merit-hub.service caddy.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/class-merit-healthcheck
+EOF
+
+cat > /etc/systemd/system/class-merit-healthcheck.timer <<'EOF'
+[Unit]
+Description=Check Class Merit Hub health every minute
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
 echo "[6/8] Configuring DuckDNS and HTTPS..."
 cat > "$ETC_DIR/duckdns.env" <<EOF
 DUCKDNS_DOMAIN=$DUCKDNS_DOMAIN
@@ -199,6 +221,7 @@ systemctl enable --now apt-daily-upgrade.timer
 echo "[8/8] Starting services..."
 systemctl daemon-reload
 systemctl enable --now class-merit-hub.service
+systemctl enable --now class-merit-healthcheck.timer
 systemctl enable --now class-merit-duckdns.timer
 /usr/local/sbin/class-merit-duckdns-update
 systemctl enable caddy
