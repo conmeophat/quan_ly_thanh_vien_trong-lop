@@ -1,4 +1,4 @@
-"""Password and bootstrap security helpers for the class merit tracker."""
+"""Password security helpers for the class merit tracker."""
 
 from __future__ import annotations
 
@@ -24,13 +24,16 @@ def validate_password(password: str) -> None:
         raise PasswordPolicyError("Mật khẩu không được dài quá 128 ký tự.")
 
 
+def hash_password(password: str) -> str:
+    validate_password(password)
+    return PASSWORD_HASHER.hash(password)
+
+
 def verify_password(password_hash: str, password: str) -> bool:
     try:
         return PASSWORD_HASHER.verify(password_hash, password)
     except (VerifyMismatchError, VerificationError, InvalidHashError):
         return False
-
-
 
 
 def generate_password(length: int = 22) -> str:
