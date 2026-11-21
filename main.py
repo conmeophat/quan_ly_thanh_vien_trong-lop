@@ -26,7 +26,7 @@ PORT = int(os.getenv("PORT", "8080"))
 if len(STORAGE_SECRET) < 32:
     raise RuntimeError("NICEGUI_STORAGE_SECRET chưa được cấu hình hoặc ngắn hơn 32 ký tự. Hãy tạo file .env theo README.md.")
 
-ui.colors(primary="#2457A6", secondary="#64748B", accent="#0F766E", positive="#15803D", negative="#B91C1C")
+app.colors(primary="#2457A6", secondary="#64748B", accent="#0F766E", positive="#15803D", negative="#B91C1C")
 PAGE_STYLES = """
 <style>
   body { background: #f4f7fb; }
