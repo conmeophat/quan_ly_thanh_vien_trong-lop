@@ -176,7 +176,7 @@ Script sẽ:
 5. Cấu hình systemd timer chạy mỗi ngày khoảng 02:30 giờ Việt Nam (19:30 UTC).
 6. Thực hiện một bản backup đầu tiên ngay lúc cài.
 
-Mỗi bản backup dùng SQLite online backup API để tạo bản nhất quán, chạy PRAGMA integrity_check, gzip rồi mã hóa age trước khi upload. Bucket chỉ nhận file mã hóa, không nhận database plaintext.
+Mỗi bản backup dùng SQLite online backup API để tạo bản nhất quán, chạy PRAGMA integrity_check, gzip rồi mã hóa age trước khi upload. Bucket chỉ nhận file mã hóa, không nhận database plaintext. Mỗi file mã hóa có thêm checksum SHA-256 để phát hiện lỗi truyền tải hoặc hỏng file.
 
 Script giữ 14 ngày bản mã hóa trên máy chủ và 60 bản backup mới nhất trên Object Storage. Hạn mức Object Storage Always Free hiện là 20 GB; cần theo dõi dung lượng bucket và số lượng backup thực tế.
 
@@ -186,21 +186,25 @@ Khóa riêng được tạo ở:
 
 /root/class-merit-backup-identity.txt
 
-Sao chép khóa này ra máy tính cá nhân/USB an toàn, tách khỏi VM và GitHub. Ví dụ nếu tài khoản SSH mặc định là ubuntu:
+Sao chép **cả khóa riêng và khóa công khai (recipient)** ra máy tính cá nhân/USB an toàn, tách khỏi VM và GitHub. Khóa công khai không bí mật nhưng cần giữ để VM mới tiếp tục mã hóa bằng đúng khóa cũ. Ví dụ nếu tài khoản SSH mặc định là ubuntu:
 
 ~~~bash
 sudo cp /root/class-merit-backup-identity.txt /home/ubuntu/
 sudo chown ubuntu:ubuntu /home/ubuntu/class-merit-backup-identity.txt
 sudo chmod 600 /home/ubuntu/class-merit-backup-identity.txt
+sudo cp /etc/class-merit-hub/backup-recipient.txt /home/ubuntu/class-merit-backup-recipient.txt
+sudo chown ubuntu:ubuntu /home/ubuntu/class-merit-backup-recipient.txt
+sudo chmod 600 /home/ubuntu/class-merit-backup-recipient.txt
 ~~~
 
 Từ PowerShell trên Windows:
 
 ~~~powershell
 scp ubuntu@YOUR_VM_PUBLIC_IP:/home/ubuntu/class-merit-backup-identity.txt .
+scp ubuntu@YOUR_VM_PUBLIC_IP:/home/ubuntu/class-merit-backup-recipient.txt .
 ~~~
 
-Giữ ít nhất hai bản sao ngoại tuyến an toàn. Mất khóa riêng đồng nghĩa không thể giải mã các bản backup.
+Giữ ít nhất hai bản sao ngoại tuyến an toàn. Mất khóa riêng đồng nghĩa không thể giải mã các bản backup. Khóa recipient có thể được dùng để tiếp tục mã hóa backup mới bằng cùng cặp khóa.
 
 Sau khi tải xuống và xác minh khóa đã lưu an toàn, xóa các bản khóa riêng trên VM:
 
@@ -222,7 +226,49 @@ sudo ls -lh /var/backups/class-merit-hub/
 
 Mở OCI Console và xác nhận file mới xuất hiện trong bucket. Phải chạy thử giải mã/khôi phục trên môi trường test trước khi đưa dữ liệu học sinh thật vào sử dụng.
 
-### 7.6. Khôi phục
+### 7.6. Thêm một bản sao ở nhà cung cấp độc lập (khuyến nghị)
+
+OCI Object Storage và VM nằm trong cùng tenancy, vì vậy chúng không đủ độc lập nếu toàn bộ tài khoản OCI bị khóa hoặc mất quyền truy cập. Có thể thêm một kho lưu trữ của nhà cung cấp khác, ở một tài khoản riêng. Script dùng rclone; dữ liệu được age mã hóa trước khi rời VM.
+
+~~~bash
+sudo bash /opt/class-merit-hub/deploy/oracle/configure_rclone_backup.sh
+~~~
+
+Trong giao diện rclone, cấu hình remote của dịch vụ lưu trữ thứ hai. Ví dụ tên remote/path có thể là `gdrive:ClassMeritHub`; đây chỉ là ví dụ, không phải khẳng định mọi dịch vụ đều có gói miễn phí vĩnh viễn. Sau khi cấu hình, nhập remote/path vào script.
+
+- Dùng nhà cung cấp và tài khoản độc lập với OCI; một bucket thứ hai trong cùng tenancy không giải quyết rủi ro mất tenancy.
+- Chỉ file `.age` đã mã hóa và checksum được tải lên; database SQLite thô và khóa giải mã không được tải lên.
+- Rclone xác minh checksum sau khi upload và giữ tối đa 60 bản backup mới nhất theo mặc định.
+- Quota, giới hạn API, chính sách tài khoản và điều kiện miễn phí của nhà cung cấp thứ hai có thể thay đổi. Kiểm tra dung lượng và điều khoản; không xem đây là cam kết lưu trữ miễn phí vĩnh viễn.
+- Cấu hình rclone có thể chứa OAuth token. Script chạy bằng root; giữ file cấu hình trong thư mục root, không đưa lên GitHub và không gửi token qua chat.
+
+Có thể kiểm tra backup đã được gửi tới cả hai nơi bằng cách chạy backup rồi xem log:
+
+~~~bash
+sudo systemctl start class-merit-backup.service
+sudo journalctl -u class-merit-backup.service -n 100 --no-pager
+~~~
+
+### 7.7. Kiểm tra bản backup mà không ghi đè dữ liệu đang chạy
+
+Khi khóa riêng age đang nằm tạm thời trên VM, chạy:
+
+~~~bash
+sudo bash /opt/class-merit-hub/deploy/oracle/verify_backup.sh \
+  /var/backups/class-merit-hub/TEN_FILE.sqlite3.gz.age \
+  /home/ubuntu/class-merit-backup-identity.txt
+~~~
+
+Bỏ đối số đường dẫn backup để kiểm tra bản local mới nhất:
+
+~~~bash
+sudo bash /opt/class-merit-hub/deploy/oracle/verify_backup.sh \
+  "" /home/ubuntu/class-merit-backup-identity.txt
+~~~
+
+Công cụ kiểm tra SHA-256 (nếu có sidecar), giải mã age, kiểm tra gzip, chạy SQLite integrity check và xác nhận các bảng cốt lõi. Nó **không thay đổi database đang chạy**. Hãy diễn tập xác minh và phục hồi trên môi trường thử nghiệm định kỳ, không chờ đến lúc VM gặp sự cố.
+
+### 7.8. Khôi phục
 
 Khi cần khôi phục, tải file mã hóa từ bucket về VM, tải khóa age riêng từ bản sao ngoại tuyến lên VM tạm thời. Ví dụ:
 
@@ -251,6 +297,8 @@ Sau khi xác nhận ứng dụng đã khôi phục bình thường, xóa bản k
 
 Script giải mã, kiểm tra gzip, SQLite integrity và bảng bắt buộc trước khi hỏi xác nhận. File database cũ được giữ lại với hậu tố pre-restore. Sau khôi phục, kiểm tra health check, đăng nhập và hồ sơ điểm.
 
+Điểm quan trọng cho tình huống VM cũ đã mất: `restore.sh` có thể chạy ngay sau khi cài ứng dụng mới, kể cả khi `backup.env` chưa được tạo. Chỉ cần `app.env` đã có DATABASE_PATH, file backup mã hóa và khóa riêng tương ứng. Không cần chạy cấu hình backup trước bước restore.
+
 ## 8. Cập nhật website an toàn
 
 ~~~bash
@@ -268,7 +316,46 @@ sudo journalctl -u class-merit-healthcheck -n 100 --no-pager
 sudo journalctl -u class-merit-hub -f
 ~~~
 
-## 9. Giới hạn uptime và độ bền dữ liệu — phải hiểu trước khi sử dụng
+## 9. Dựng lại hệ thống khi VM cũ bị thu hồi hoặc hỏng
+
+Quy trình này phục hồi ứng dụng trên VM mới, không cần lấy lại VM cũ:
+
+1. Tạo VM Always Free mới trong home region nếu OCI vẫn cấp được capacity. Tạo lại VCN/Network Security Group và mở đúng TCP 22, 80, 443.
+2. Nếu dùng OCI Object Storage, cập nhật Dynamic Group matching rule để bao gồm **OCID instance mới**; giữ policy chỉ cho phép ghi/đọc bucket backup cần thiết. Nếu dùng kho rclone độc lập, cấu hình lại remote trên VM mới.
+3. Cài Ubuntu 24.04, clone repository và chạy `install_ubuntu.sh`. Nhập lại DuckDNS subdomain/token; kiểm tra DuckDNS phân giải về IP mới. Chưa tạo tài khoản founder trước khi restore.
+4. Lấy file backup mã hóa mới nhất từ OCI Console/CLI hoặc kho rclone thứ hai. Cũng có thể dùng một bản đã lưu ngoại tuyến trên máy tính cá nhân.
+5. Chép khóa riêng age từ bản ngoại tuyến lên VM mới qua SCP. Đưa file backup vào VM, sau đó giải mã/khôi phục bằng lệnh bên dưới. `restore.sh` không cần `backup.env` ở bước này.
+
+~~~bash
+sudo bash /opt/class-merit-hub/deploy/oracle/restore.sh \
+  /tmp/class-merit-latest.sqlite3.gz.age \
+  /home/ubuntu/class-merit-backup-identity.txt
+~~~
+
+6. Khi restore báo thành công, kiểm tra `https://TEN-SUBDOMAIN.duckdns.org/healthz`, đăng nhập bằng tài khoản cũ và kiểm tra một số hồ sơ/nhật ký.
+7. Khôi phục file recipient công khai cũ trước khi cấu hình backup tiếp tục. Ví dụ nếu đã tải recipient file về cùng thư mục:
+
+~~~bash
+sudo install -m 0640 -o root -g root \
+  /home/ubuntu/class-merit-backup-recipient.txt \
+  /etc/class-merit-hub/backup-recipient.txt
+sudo bash /opt/class-merit-hub/deploy/oracle/configure_backup.sh
+~~~
+
+Nếu không còn file recipient công khai nhưng vẫn có khóa riêng cũ, có thể tái tạo recipient từ khóa riêng:
+
+~~~bash
+age-keygen -y -i /home/ubuntu/class-merit-backup-identity.txt \
+  | sudo tee /etc/class-merit-hub/backup-recipient.txt >/dev/null
+sudo chmod 0640 /etc/class-merit-hub/backup-recipient.txt
+sudo chown root:root /etc/class-merit-hub/backup-recipient.txt
+~~~
+
+Script cấu hình backup kiểm tra bucket. Nếu đã có backup cũ nhưng chưa có recipient file, nó yêu cầu recipient cũ thay vì âm thầm sinh khóa mới. Điều này giúp tránh làm các backup hiện có không thể giải mã. Chỉ sau khi khôi phục thành công mới xóa bản khóa riêng tạm trên VM.
+
+**Giới hạn:** quy trình này cần còn quyền truy cập ít nhất một bản backup và khóa riêng age. Nếu mất cả hai, dữ liệu mã hóa không thể khôi phục. Nếu OCI không cấp VM mới hoặc nhà cung cấp lưu trữ thứ hai cũng khóa tài khoản, thời gian khôi phục không được bảo đảm.
+
+## 10. Giới hạn uptime và độ bền dữ liệu — phải hiểu trước khi sử dụng
 
 - Oracle ghi rõ máy ảo Always Free nhàn rỗi có thể bị thu hồi. Một instance bị coi là idle nếu trong 7 ngày liên tục: CPU utilization ở percentile 95 dưới 20%, network utilization dưới 20%, và riêng A1 thì memory utilization dưới 20%.
 - Website lớp học ít truy cập có thể rơi vào ngưỡng này. Không có cách hợp lệ để đảm bảo Oracle không thu hồi máy bằng cách giả lập tải.
@@ -280,7 +367,7 @@ sudo journalctl -u class-merit-hub -f
 
 Vì vậy, kiến trúc này có thể hướng tới chi phí hosting 0 đồng trong hạn mức, nhưng không thể bảo đảm website hoạt động 24/7 tuyệt đối hoặc dữ liệu tồn tại vĩnh viễn.
 
-## 10. Kiểm soát để không phát sinh phí ngoài ý muốn
+## 11. Kiểm soát để không phát sinh phí ngoài ý muốn
 
 - Chỉ tạo tài nguyên có nhãn Always Free Eligible và ở home region.
 - Không tạo Paid Load Balancer, NAT Gateway, shape trả phí, volume vượt giới hạn, bucket/tier vượt quota hoặc dịch vụ trial-only.
