@@ -14,6 +14,14 @@ git fetch origin main
 git pull --ff-only origin main
 .venv/bin/pip install -r requirements.txt
 chown -R classmerit:classmerit /opt/class-merit-hub
+if [[ -f /etc/class-merit-hub/backup.env ]]; then
+  install -m 0750 -o root -g root \
+    /opt/class-merit-hub/deploy/oracle/backup.sh \
+    /usr/local/sbin/class-merit-backup
+  install -m 0750 -o root -g root \
+    /opt/class-merit-hub/deploy/oracle/verify_backup.sh \
+    /usr/local/sbin/class-merit-verify-backup
+fi
 systemctl restart class-merit-hub
 sleep 5
 curl --fail --silent http://127.0.0.1:8080/healthz
