@@ -48,26 +48,38 @@ async function dashboard(){
   try{
     let d=await api("/api/dashboard");
     if(d.personal){
-      app.innerHTML='<section class="dashboard-head"><div class="page-intro"><p class="eyebrow">KHÔNG GIAN THÀNH VIÊN</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Đây là bảng theo dõi điểm thi đua và nhận xét của bạn.</p></div><div class="page-actions"><span class="role-pill">'+esc(roles[me.role])+'</span><button class="btn alt" id="member-change-password" type="button">Đổi mật khẩu</button></div></section>'+personal(d.personal);
-      document.querySelector("#member-change-password").onclick=()=>passwordPanel(app);
+      app.innerHTML=
+        '<div class="chess-shell member-shell"><aside class="chess-sidebar"><div class="sidebar-brand"><span class="sidebar-orb">ĐT</span><div><strong>KHÔNG GIAN CỦA BẠN</strong><small>Điều hướng cá nhân</small></div></div><div class="sidebar-section-label">CÁ NHÂN</div><div class="side-link side-link-static is-active"><span class="side-icon">▦</span><span class="side-copy"><strong>Bảng điểm của tôi</strong><small>Kết quả và nhận xét</small></span></div><div class="sidebar-divider"></div><div class="sidebar-section-label">TÀI KHOẢN</div><button class="side-link" id="member-change-password" type="button"><span class="side-icon">⚙</span><span class="side-copy"><strong>Đổi mật khẩu</strong><small>Bảo vệ tài khoản</small></span><span class="side-arrow">›</span></button><div class="sidebar-spacer"></div><div class="sidebar-user"><span class="sidebar-user-dot"></span><div><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div></div></aside><section class="chess-main"><div class="dashboard-head"><div class="page-intro"><p class="eyebrow">TỔNG QUAN CÁ NHÂN</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Theo dõi điểm số và nhận xét của bạn tại đây.</p></div><span class="role-pill">'+esc(roles[me.role])+'</span></div>'+personal(d.personal)+'</section></div>';
+      document.querySelector("#member-change-password").onclick=()=>passwordPanel(app.querySelector(".chess-main"));
       return;
     }
     if(me.role==="founder"){updatePendingRegistrations(d.pending_members||[]);startRegistrationWatch()}
     const count=d.groups.reduce((s,g)=>s+g.member_count,0);
     const points=d.groups.reduce((s,g)=>s+g.total_points,0);
     const canManage=["founder","teacher"].includes(me.role);
+    const isFounder=me.role==="founder";
+    const navButton=(key,icon,label,description,countLabel="")=>'<button class="side-link '+(tab===key?"is-active":"")+'" data-tab="'+key+'" type="button"'+(tab===key?' aria-current="page"':"")+'><span class="side-icon" aria-hidden="true">'+icon+'</span><span class="side-copy"><strong>'+label+'</strong><small>'+description+'</small></span>'+(countLabel?'<span class="side-count">'+countLabel+'</span>':'<span class="side-arrow" aria-hidden="true">›</span>')+'</button>';
     app.innerHTML=
-      '<section class="dashboard-head"><div class="page-intro"><p class="eyebrow">TỔNG QUAN LỚP HỌC</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Theo dõi thành tích, điểm số và hoạt động của các tổ trong lớp.</p></div><div class="page-actions"><span class="role-pill">'+esc(roles[me.role])+'</span>'+(me.role==="founder"?'<button class="btn alt notification-btn" id="enable-notifications" type="button"><span aria-hidden="true">♧</span> Bật thông báo</button>':"")+'</div></section>'+
+      '<div class="chess-shell"><aside class="chess-sidebar" aria-label="Điều hướng chính"><div class="sidebar-brand"><span class="sidebar-orb">ĐT</span><div><strong>TRUNG TÂM LỚP HỌC</strong><small>Khu vực quản lý</small></div></div><div class="sidebar-section-label">KHÔNG GIAN LỚP</div><nav class="side-nav">'+
+      navButton("groups","▦","Tổng quan","Các tổ và điểm số")+
+      (canManage?navButton("accounts","♙","Tài khoản","Duyệt và quản lý",isFounder&&d.pending_members.length?String(d.pending_members.length):""):"")+
+      (isFounder?navButton("audit","◷","Nhật ký","Lịch sử hoạt động"):"")+
+      '</nav><div class="sidebar-divider"></div><div class="sidebar-section-label">CÀI ĐẶT</div><nav class="side-nav">'+
+      navButton("password","⚙","Đổi mật khẩu","Bảo mật tài khoản")+
+      '</nav><div class="sidebar-spacer"></div><div class="sidebar-user"><span class="sidebar-user-dot"></span><div><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div></div></aside>'+
+      '<section class="chess-main"><div class="dashboard-head"><div class="page-intro"><p class="eyebrow">TỔNG QUAN LỚP HỌC</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Theo dõi thành tích, điểm số và hoạt động của các tổ trong lớp.</p></div><div class="page-actions"><span class="role-pill">'+esc(roles[me.role])+'</span>'+(isFounder?'<button class="btn alt notification-btn" id="enable-notifications" type="button"><span aria-hidden="true">♧</span> Bật thông báo</button>':"")+'</div></div>'+
       '<div class="grid"><div class="stat"><span>Tổ quản lý</span><strong>'+d.groups.length+'</strong></div><div class="stat"><span>Thành viên</span><strong>'+count+'</strong></div><div class="stat"><span>Tổng điểm</span><strong>'+n(points)+'</strong></div><div class="stat"><span>Chờ duyệt</span><strong>'+d.pending_members.length+'</strong></div></div>'+
-      (me.role==="founder"&&d.pending_members.length?'<section class="notice-card"><div class="notice-icon" aria-hidden="true">!</div><div class="notice-copy"><strong>Có '+d.pending_members.length+' đăng ký mới đang chờ duyệt</strong><p>Hãy xem thông tin và xác nhận tài khoản trước khi thành viên sử dụng hệ thống.</p></div><button class="btn" type="button" data-tab="accounts">Xem đăng ký <span aria-hidden="true">→</span></button></section>':"")+
-      '<div class="section-toolbar"><div><p class="eyebrow">ĐIỀU HƯỚNG</p><h2>Khu vực quản lý</h2></div><small>Chọn một mục để tiếp tục</small></div>'+
-      '<nav class="tabs" aria-label="Khu vực quản lý"><button class="tab active" data-tab="groups" type="button"><span aria-hidden="true">▦</span> Các tổ</button>'+
-      (canManage?'<button class="tab" data-tab="accounts" type="button"><span aria-hidden="true">♙</span> Tài khoản'+(me.role==="founder"&&d.pending_members.length?' <span class="tab-count">'+d.pending_members.length+'</span>':'')+'</button>':"")+
-      (me.role==="founder"?'<button class="tab" data-tab="audit" type="button"><span aria-hidden="true">≡</span> Nhật ký</button>':"")+
-      '<button class="tab" data-tab="password" type="button"><span aria-hidden="true">⚙</span> Đổi mật khẩu</button></nav><div id="panel" class="content-panel"></div>';
+      (isFounder&&d.pending_members.length?'<section class="notice-card"><div class="notice-icon" aria-hidden="true">!</div><div class="notice-copy"><strong>Có '+d.pending_members.length+' đăng ký mới đang chờ duyệt</strong><p>Hãy xem thông tin và xác nhận tài khoản trước khi thành viên sử dụng hệ thống.</p></div><button class="btn" type="button" data-tab="accounts">Xem đăng ký <span aria-hidden="true">→</span></button></section>':"")+
+      '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="accounts"?"Quản lý tài khoản":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section></div>';
     document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{
       tab=b.dataset.tab;
-      document.querySelectorAll(".tabs .tab").forEach(x=>x.classList.toggle("active",x.dataset.tab===tab));
+      document.querySelectorAll(".side-link[data-tab]").forEach(x=>{
+        const active=x.dataset.tab===tab;
+        x.classList.toggle("is-active",active);
+        if(active)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current");
+      });
+      const title=document.querySelector("#workspace-title");
+      if(title)title.textContent=tab==="accounts"?"Quản lý tài khoản":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
       panel();
     });
     const notifyButton=document.querySelector("#enable-notifications");
