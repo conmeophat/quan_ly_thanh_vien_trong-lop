@@ -345,9 +345,6 @@ class Default(WorkerEntrypoint):
                 await _audit(database,int(actor["id"]),"delete_account",target_id,target["full_name"]+" | "+ROLE_LABELS.get(target["role"],target["role"]))
                 return _response({"ok":True,"message":"Tài khoản đã bị vô hiệu hóa; dữ liệu thi đua được giữ lại."})
             if len(parts)==4:
-
-            parts=path.strip("/").split("/")
-            if len(parts)==4:
                 target_id=int(parts[2])
                 action=parts[3]
                 target=await _first(database,"SELECT * FROM users WHERE id=?",target_id)
