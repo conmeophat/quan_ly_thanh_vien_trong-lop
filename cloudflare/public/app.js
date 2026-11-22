@@ -120,22 +120,3 @@ try{await api("/api/audit","DELETE",{});toast("Đã dọn nhật ký cũ.");awai
 }
 
 start();
-
-async function loadWallpaper(){
-  try{
-    const parts=["00","01a","01b","02","03","04a","04b","05"];
-    const encoded=await Promise.all(parts.map(async name=>{
-      const response=await fetch("/wallpaper/"+name+".b64",{cache:"force-cache"});
-      if(!response.ok)throw new Error("Không tải được ảnh nền");
-      return (await response.text()).trim();
-    }));
-    document.documentElement.style.setProperty(
-      "--wallpaper-image",
-      'url("data:image/webp;base64,'+encoded.join("")+'")'
-    );
-  }catch(error){
-    console.warn("Không thể tải ảnh nền",error);
-  }
-}
-loadWallpaper();
-
