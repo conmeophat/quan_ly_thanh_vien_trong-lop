@@ -380,7 +380,7 @@ class Default(WorkerEntrypoint):
         ]
         workbook = _build_xlsx(sheets)
         await _audit(database,int(actor["id"]),"export_merit_excel",None,
-            "Xuất Excel: " + str(len(members)) + " thành viên, " + str(len(score_rows)) + " lượt ghi điểm, " + str(len(evaluation_rows)) + " nhận xét.")
+            "Xuất Excel: " + str(len(members)) + " thành viên, " + str(len(score_rows)) + " lượt ghi điểm, " + str(len(evaluation_rows)) + " nhận xét."
         )
         headers = Headers.new()
         headers.set("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
