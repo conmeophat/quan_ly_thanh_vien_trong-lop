@@ -16,14 +16,14 @@ This is a separate Cloudflare deployment target. The existing Windows/NiceGUI/SQ
 5. This is a first Cloudflare port of core workflows, not complete feature parity: score/evaluation editing, complete account editing and SQLite import still need implementation.
 
 ## 1. Create D1
-Cloudflare Dashboard → Storage & databases → D1 SQL Database → Create database. Name it exactly class-merit-hub. Copy the Database ID and replace 00000000-0000-0000-0000-000000000000 in wrangler.jsonc. Keep binding DB.
-Alternatively run npx wrangler d1 create class-merit-hub from this folder.
+Cloudflare Dashboard → Storage & databases → D1 SQL Database → Create database. Name it exactly `quan-ly-diem-thi-dua`. Copy the Database ID and replace 00000000-0000-0000-0000-000000000000 in wrangler.jsonc. Keep binding DB.
+Alternatively run npx wrangler d1 create quan-ly-diem-thi-dua from this folder.
 
 ## 2. Apply the schema
 From this folder, with Node.js and uv installed:
-    uv run pywrangler d1 migrations apply class-merit-hub --remote
+    uv run pywrangler d1 migrations apply quan-ly-diem-thi-dua --remote
 or:
-    npx wrangler d1 migrations apply class-merit-hub --remote
+    npx wrangler d1 migrations apply quan-ly-diem-thi-dua --remote
 Apply migrations/0001_initial.sql to the remote database before making the site public.
 
 ## 3. Add secret values
@@ -34,6 +34,8 @@ Add these as Secrets:
 Generate locally in PowerShell:
     py -c "import secrets; print(secrets.token_urlsafe(48))"
 Never commit secrets or paste them into chat.
+
+Note: the D1 database name is `quan-ly-diem-thi-dua`. The Worker service name remains `class-merit-hub`; they are two different Cloudflare resources.
 
 ## 4. Connect GitHub
 Create Worker → Continue with GitHub → account conmeophat → repo quan_ly_thanh_vien_trong-lop.
