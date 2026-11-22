@@ -154,3 +154,8 @@ Các script có trong thư mục deploy/windows-standby:
 - update_duckdns.ps1 và run_public_standby.ps1: cập nhật DNS và bật HTTPS khi chuyển thủ công sang máy nhà.
 
 Đây là dự phòng thủ công, không phải failover tự động. Muốn người dùng bên ngoài truy cập khi chuyển sang máy nhà cần public IPv4 + port forwarding, hoặc một Cloudflare Tunnel với domain được quản lý trên Cloudflare. Không chạy đồng thời hai máy cho phép người dùng ghi dữ liệu.
+
+
+## 11. Cloudflare Workers deployment
+
+A separate Cloudflare-native implementation is in [cloudflare/README_VI.md](cloudflare/README_VI.md). It uses a Python Worker, D1 and Workers Static Assets. The original Windows/NiceGUI/SQLite version remains in the repository root. The Cloudflare database starts empty; do not assume local SQLite users or passwords have been migrated.

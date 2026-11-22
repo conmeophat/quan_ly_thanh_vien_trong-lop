@@ -1,0 +1,9 @@
+[project]
+name = "class-merit-hub-cloudflare"
+version = "0.1.0"
+description = "Class Merit Hub deployed as a Cloudflare Python Worker"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["workers-py", "workers-runtime-sdk"]
