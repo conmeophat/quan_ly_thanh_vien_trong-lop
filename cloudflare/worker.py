@@ -8,7 +8,8 @@ from workers import WorkerEntrypoint
 
 SESSION_COOKIE = "cmh_session"
 SESSION_TTL = 28800
-PBKDF2_ITERATIONS = 210000
+# Cloudflare Workers Web Crypto currently rejects PBKDF2 iteration counts above 100,000.
+PBKDF2_ITERATIONS = 100000
 ROLE_LABELS = {"founder":"Người sáng lập","teacher":"Giáo viên chủ nhiệm","leader":"Tổ trưởng","member":"Thành viên"}
 
 def _obj(**values):
