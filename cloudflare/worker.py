@@ -124,7 +124,7 @@ def _xlsx_text(value):
     raw = str(value if value is not None else "")
     clean = "".join(
         char for char in raw
-        if char in "\\t\\n\\r" or (ord(char) >= 32 and not 0xD800 <= ord(char) <= 0xDFFF)
+        if char in "\t\n\r" or (ord(char) >= 32 and not 0xD800 <= ord(char) <= 0xDFFF)
     )
     return escape(clean)
 
