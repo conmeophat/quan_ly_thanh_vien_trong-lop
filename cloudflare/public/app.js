@@ -21,48 +21,60 @@ async function member(id){try{let d=await api("/api/members/"+id),edit=me.role!=
 function scores(a,del){return a.length?a.map(s=>'<div class="record"><div class="row between"><b class="'+(s.points<0?"negative":"points")+'">'+(s.points>0?"+":"")+n(s.points)+' điểm</b><small>'+esc(s.created_at)+'</small></div><p><b>'+esc(s.category)+'</b> · '+esc(s.note)+'</p>'+(del?'<button class="btn link" data-score="'+s.id+'">Ẩn</button>':"")+'</div>').join(""):'<div class="empty">Chưa có dữ liệu điểm.</div>'}
 function evaluations(a,del){return a.length?a.map(x=>'<div class="record"><p>'+esc(x.content)+'</p><small>'+esc(x.created_at)+'</small>'+(del?'<button class="btn link" data-eval="'+x.id+'">Ẩn nhận xét</button>':"")+'</div>').join(""):'<div class="empty">Chưa có nhận xét.</div>'}
 async function accounts(el,pending){
-const canCreateTeacher=me.role==="founder";
-let accountData;
-try{accountData=await api("/api/accounts")}catch(e){el.innerHTML='<section class="card">'+esc(e.message)+'</section>';return}
-const accountRows=accountData.accounts||[];
-const accountsHtml=accountRows.length?accountRows.map(x=>{
-const status=!x.is_active?"Đã xóa":x.registration_status==="pending"?"Chờ duyệt":x.registration_status==="rejected"?"Đã từ chối":"Đang hoạt động";
-const group=x.group_no?"Tổ "+x.group_no:"Không thuộc tổ";
-const removeButton=me.role==="founder"&&x.role!=="founder"&&x.is_active?'<button class="btn red" data-delete-account="'+x.id+'" data-account-name="'+esc(x.full_name)+'">Xóa tài khoản</button>':"";
-return '<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · '+esc(x.role_label||roles[x.role]||x.role)+' · '+esc(group)+' · '+esc(status)+'</small></div>'+removeButton+'</div>';
-}).join(""):'<div class="empty">Chưa có tài khoản.</div>';
-el.innerHTML='<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ. Mật khẩu gốc không thể xem lại; Người sáng lập có thể cấp mật khẩu tạm mới cho thành viên đã được duyệt.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
-const roleSelect=el.querySelector("#create-role");
-const groupField=el.querySelector("#group-field");
-const groupSelect=el.querySelector('[name="group_no"]');
-const teacherNote=el.querySelector("#teacher-role-note");
-function syncRoleFields(){
-const isTeacher=roleSelect.value==="teacher";
-groupField.hidden=isTeacher;
-groupSelect.disabled=isTeacher;
-groupSelect.required=!isTeacher;
-teacherNote.hidden=!isTeacher;
-if(isTeacher)groupSelect.value="";
-}
-roleSelect.addEventListener("change",syncRoleFields);
-syncRoleFields();
-el.querySelectorAll("[data-approve]").forEach(b=>b.onclick=async()=>{try{await api("/api/accounts/"+b.dataset.approve+"/approve","POST",{});await dashboard()}catch(e){toast(e.message)}});
-el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=async()=>{if(!confirm("Từ chối đăng ký?"))return;try{await apel.querySelectorAll("[data-reset-password]").forEach(b=>b.onclick=async()=>{
-if(!confirm('Cấp một mật khẩu tạm mới cho "'+b.dataset.accountName+'"? Mật khẩu hiện tại sẽ mất hiệu lực.'))return;
-try{
-const result=await api("/api/accounts/"+b.dataset.resetPassword+"/reset-password","POST",{});
-if(!result.temporary_password)throw Error("Máy chủ không trả về mật khẩu tạm.");
-window.prompt("Mật khẩu tạm cho "+b.dataset.accountName+". Hãy sao chép và gửi riêng cho thành viên. Mật khẩu này chỉ hiển thị một lần:",result.temporary_password);
-toast("Đã cấp mật khẩu tạm; mật khẩu cũ đã bị thu hồi.");
-await accounts(el,pending);
-}catch(e){toast(e.message)}
-});
-el.querySelectorAll("[data-delete-account]").forEach(b=>b.onclick=async()=>{
-if(!confirm('Xóa tài khoản "'+b.dataset.accountName+'" ? Người này sẽ không thể đăng nhập nữa. Lịch sử điểm và nhận xét sẽ được giữ lại.'))return;
-try{await api("/api/accounts/"+b.dataset.deleteAccount,"DELETE",{});toast("Đã xóa tài khoản (đã khóa đăng nhập).");await dashboard()}catch(e){toast(e.message)}
-});LETE",{});toast("Đã xóa tài khoản (đã khóa đăng nhập).");await dashboard()}catch(e){toast(e.message)}
-});
-document.querySelector("#create").onsubmit=async e=>{e.preventDefault();try{const data=fd(e.target);if(data.role==="teacher")delete data.group_no;await api("/api/accounts","POST",data);toast("Đã tạo tài khoản");await dashboard()}catch(x){toast(x.message)}};
+  const canCreateTeacher=me.role==="founder";
+  let accountData;
+  try{accountData=await api("/api/accounts")}catch(e){el.innerHTML='<section class="card">'+esc(e.message)+'</section>';return}
+  const accountRows=accountData.accounts||[];
+  const accountsHtml=accountRows.length?accountRows.map(x=>{
+    const status=!x.is_active?"Đã xóa":x.registration_status==="pending"?"Chờ duyệt":x.registration_status==="rejected"?"Đã từ chối":"Đang hoạt động";
+    const group=x.group_no?"Tổ "+x.group_no:"Không thuộc tổ";
+    const resetButton=me.role==="founder"&&x.role==="member"&&x.is_active&&x.registration_status==="approved"
+      ? '<button class="btn alt" data-reset-password="'+x.id+'" data-account-name="'+esc(x.full_name)+'">Cấp mật khẩu tạm</button>' : "";
+    const removeButton=me.role==="founder"&&x.role!=="founder"&&x.is_active
+      ? '<button class="btn red" data-delete-account="'+x.id+'" data-account-name="'+esc(x.full_name)+'">Xóa tài khoản</button>' : "";
+    const actions=resetButton||removeButton?'<div class="actions">'+resetButton+removeButton+'</div>':"";
+    return '<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · '+esc(x.role_label||roles[x.role]||x.role)+' · '+esc(group)+' · '+esc(status)+'</small></div>'+actions+'</div>';
+  }).join(""):'<div class="empty">Chưa có tài khoản.</div>';
+  el.innerHTML='<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ. Mật khẩu gốc không thể xem lại; Người sáng lập có thể cấp mật khẩu tạm mới cho thành viên đã được duyệt.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
+  const roleSelect=el.querySelector("#create-role");
+  const groupField=el.querySelector("#group-field");
+  const groupSelect=el.querySelector('[name="group_no"]');
+  const teacherNote=el.querySelector("#teacher-role-note");
+  function syncRoleFields(){
+    const isTeacher=roleSelect.value==="teacher";
+    groupField.hidden=isTeacher;
+    groupSelect.disabled=isTeacher;
+    groupSelect.required=!isTeacher;
+    teacherNote.hidden=!isTeacher;
+    if(isTeacher)groupSelect.value="";
+  }
+  roleSelect.addEventListener("change",syncRoleFields);
+  syncRoleFields();
+  el.querySelectorAll("[data-approve]").forEach(b=>b.onclick=async()=>{
+    try{await api("/api/accounts/"+b.dataset.approve+"/approve","POST",{});await dashboard()}catch(e){toast(e.message)}
+  });
+  el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=async()=>{
+    if(!confirm("Từ chối đăng ký?"))return;
+    try{await api("/api/accounts/"+b.dataset.reject+"/reject","POST",{});await dashboard()}catch(e){toast(e.message)}
+  });
+  el.querySelectorAll("[data-reset-password]").forEach(b=>b.onclick=async()=>{
+    if(!confirm('Cấp một mật khẩu tạm mới cho "'+b.dataset.accountName+'"? Mật khẩu hiện tại sẽ mất hiệu lực.'))return;
+    try{
+      const result=await api("/api/accounts/"+b.dataset.resetPassword+"/reset-password","POST",{});
+      if(!result.temporary_password)throw Error("Máy chủ không trả về mật khẩu tạm.");
+      window.prompt("Mật khẩu tạm cho "+b.dataset.accountName+". Hãy sao chép và gửi riêng cho thành viên. Mật khẩu này chỉ hiển thị một lần:",result.temporary_password);
+      toast("Đã cấp mật khẩu tạm; mật khẩu cũ đã bị thu hồi.");
+      await accounts(el,pending);
+    }catch(e){toast(e.message)}
+  });
+  el.querySelectorAll("[data-delete-account]").forEach(b=>b.onclick=async()=>{
+    if(!confirm('Xóa tài khoản "'+b.dataset.accountName+'"? Người này sẽ không thể đăng nhập nữa. Lịch sử điểm và nhận xét sẽ được giữ lại.'))return;
+    try{await api("/api/accounts/"+b.dataset.deleteAccount,"DELETE",{});toast("Đã xóa tài khoản (đã khóa đăng nhập).");await dashboard()}catch(e){toast(e.message)}
+  });
+  document.querySelector("#create").onsubmit=async e=>{
+    e.preventDefault();
+    try{const data=fd(e.target);if(data.role==="teacher")delete data.group_no;await api("/api/accounts","POST",data);toast("Đã tạo tài khoản");await dashboard()}catch(x){toast(x.message)}
+  };
 }
 async function audit(el){
 try{
