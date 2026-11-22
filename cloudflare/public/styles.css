@@ -874,3 +874,49 @@ button:focus-visible{outline:3px solid rgba(65,125,205,.28);outline-offset:2px}
   .side-link{padding:5px 8px;gap:5px}
   .side-copy strong{font-size:9px}
 }
+
+
+/* Excel export shortcut: visible only inside the authorized roles' sidebar */
+.export-side-link{
+  margin:0 3px;
+  width:calc(100% - 6px);
+  min-height:54px;
+  color:#176d53;
+  background:#f0faf5;
+  border:1px solid #d9efe4;
+  text-decoration:none;
+}
+.export-side-link .side-icon{
+  color:#fff;
+  background:linear-gradient(145deg,#20a477,#137451);
+  border-color:transparent;
+  box-shadow:0 3px 8px rgba(19,116,81,.15);
+  font-size:19px;
+}
+.export-side-link .side-copy strong{color:#176d53}
+.export-side-link .side-copy small{color:#6a9c86}
+.export-side-link .side-arrow{color:#2c9772}
+.export-side-link:hover{
+  color:#105f46;
+  background:#e7f7ef;
+  border-color:#bfe5d2;
+  transform:translateX(2px);
+}
+.export-side-link:hover .side-icon{
+  background:linear-gradient(145deg,#188b66,#0f684a);
+  color:#fff;
+}
+@media(max-width:700px){
+  .export-side-link{
+    flex:0 0 auto;
+    width:auto;
+    min-height:40px;
+    margin:0;
+    padding:5px 10px;
+  }
+  .export-side-link .side-copy strong{font-size:10px;white-space:nowrap}
+}
+@media(max-width:380px){
+  .export-side-link{padding:5px 8px;gap:5px}
+  .export-side-link .side-copy strong{font-size:9px}
+}
