@@ -1,6 +1,7 @@
 """Cloudflare Python Worker backend for Class Merit Hub."""
 from __future__ import annotations
-import base64, hmac, json, re, secrets, time, traceback
+import base64, hmac, io, json, re, secrets, time, traceback, zipfile
+from xml.sax.saxutils import escape
 from urllib.parse import urlparse
 from js import Headers, Object, Response as JSResponse, Uint8Array, crypto, console
 from pyodide.ffi import to_js
@@ -118,6 +119,108 @@ def _public_user(user):
 async def _audit(database, actor_id, action, target_id=None, details=""):
     await _run(database,"INSERT INTO audit_logs(actor_id,action,target_user_id,details) VALUES(?,?,?,?)",actor_id,action,target_id,details[:500])
 
+
+def _xlsx_text(value):
+    raw = str(value if value is not None else "")
+    clean = "".join(
+        char for char in raw
+        if char in "\\t\\n\\r" or (ord(char) >= 32 and not 0xD800 <= ord(char) <= 0xDFFF)
+    )
+    return escape(clean)
+
+def _xlsx_column(index):
+    result = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+def _xlsx_cell(reference, value, style=None):
+    style_attr = ' s="' + str(style) + '"' if style is not None else ""
+    if value is None:
+        return '<c r="' + reference + '"' + style_attr + '/>'
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        number = format(value, ".15g") if isinstance(value, float) else str(value)
+        return '<c r="' + reference + '" t="n"' + style_attr + '><v>' + number + '</v></c>'
+    return '<c r="' + reference + '" t="inlineStr"' + style_attr + '><is><t xml:space="preserve">' + _xlsx_text(value) + '</t></is></c>'
+
+def _xlsx_sheet_xml(headers, rows, widths):
+    last_column = _xlsx_column(len(headers))
+    last_row = len(rows) + 1
+    xml_rows = []
+    all_rows = [headers] + rows
+    for row_index, row in enumerate(all_rows, start=1):
+        cells = []
+        for column_index, value in enumerate(row, start=1):
+            cells.append(_xlsx_cell(_xlsx_column(column_index) + str(row_index), value, 1 if row_index == 1 else None))
+        height = ' ht="25" customHeight="1"' if row_index == 1 else ""
+        xml_rows.append('<row r="' + str(row_index) + '"' + height + '>' + "".join(cells) + '</row>')
+    columns = []
+    for index, width in enumerate(widths, start=1):
+        columns.append('<col min="' + str(index) + '" max="' + str(index) + '" width="' + str(width) + '" customWidth="1"/>')
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+        '<sheetFormatPr defaultRowHeight="19"/>'
+        '<cols>' + "".join(columns) + '</cols>'
+        '<sheetData>' + "".join(xml_rows) + '</sheetData>'
+        '<autoFilter ref="A1:' + last_column + str(last_row) + '"/>'
+        '<pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>'
+        '</worksheet>'
+    )
+
+def _build_xlsx(sheets):
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
+        archive.writestr("[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            + "".join('<Override PartName="/xl/worksheets/sheet' + str(index) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' for index in range(1, len(sheets) + 1))
+            + '</Types>'
+        )
+        archive.writestr("_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>'
+        )
+        workbook_sheets = "".join(
+            '<sheet name="' + _xlsx_text(sheet[0]) + '" sheetId="' + str(index) + '" r:id="rId' + str(index) + '"/>'
+            for index, sheet in enumerate(sheets, start=1)
+        )
+        archive.writestr("xl/workbook.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<bookViews><workbookView xWindow="0" yWindow="0" windowWidth="24000" windowHeight="12000"/></bookViews>'
+            '<sheets>' + workbook_sheets + '</sheets></workbook>'
+        )
+        archive.writestr("xl/_rels/workbook.xml.rels",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            + "".join('<Relationship Id="rId' + str(index) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + str(index) + '.xml"/>' for index in range(1, len(sheets) + 1))
+            + '<Relationship Id="rId' + str(len(sheets) + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '</Relationships>'
+        )
+        archive.writestr("xl/styles.xml",
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            '<fonts count="2"><font><sz val="11"/><name val="Aptos"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Aptos"/></font></fonts>'
+            '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF24578F"/><bgColor indexed="64"/></patternFill></fill></fills>'
+            '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFE3EAF3"/></left><right style="thin"><color rgb="FFE3EAF3"/></right><top style="thin"><color rgb="FFE3EAF3"/></top><bottom style="thin"><color rgb="FFE3EAF3"/></bottom><diagonal/></border></borders>'
+            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf></cellXfs>'
+            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+            '</styleSheet>'
+        )
+        for index, sheet in enumerate(sheets, start=1):
+            archive.writestr("xl/worksheets/sheet" + str(index) + ".xml", _xlsx_sheet_xml(sheet[1], sheet[2], sheet[3]))
+    return output.getvalue()
+
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         path = urlparse(request.url).path
@@ -215,6 +318,78 @@ class Default(WorkerEntrypoint):
             pending=await _all(database,"SELECT id,full_name,phone,group_no,created_at FROM users WHERE role='member' AND registration_status='pending' ORDER BY created_at ASC")
         return {"user":_public_user(actor),"groups":group_data,"pending_members":pending}
 
+
+    async def _export_merit_excel(self, actor):
+        database = self.env.DB
+        members = await _all(database,
+            "SELECT u.id,u.group_no,u.full_name,u.phone,u.is_active,u.created_at,"
+            "COALESCE(s.total_points,0) AS total_points,COALESCE(s.score_count,0) AS score_count,"
+            "COALESCE(s.positive_points,0) AS positive_points,COALESCE(s.negative_points,0) AS negative_points,"
+            "COALESCE(e.evaluation_count,0) AS evaluation_count "
+            "FROM users u "
+            "LEFT JOIN (SELECT member_id,SUM(points) AS total_points,COUNT(*) AS score_count,"
+            "SUM(CASE WHEN points>0 THEN points ELSE 0 END) AS positive_points,"
+            "SUM(CASE WHEN points<0 THEN points ELSE 0 END) AS negative_points "
+            "FROM score_entries WHERE is_deleted=0 GROUP BY member_id) s ON s.member_id=u.id "
+            "LEFT JOIN (SELECT member_id,COUNT(*) AS evaluation_count FROM evaluations WHERE is_deleted=0 GROUP BY member_id) e ON e.member_id=u.id "
+            "WHERE u.role='member' AND u.registration_status='approved' "
+            "ORDER BY u.group_no,u.full_name COLLATE NOCASE"
+        )
+        score_rows = await _all(database,
+            "SELECT u.group_no,u.full_name,u.phone,s.points,s.category,s.note,"
+            "COALESCE(c.full_name,'Không rõ') AS creator_name,s.created_at "
+            "FROM score_entries s JOIN users u ON u.id=s.member_id "
+            "LEFT JOIN users c ON c.id=s.created_by "
+            "WHERE s.is_deleted=0 AND u.role='member' AND u.registration_status='approved' "
+            "ORDER BY u.group_no,u.full_name COLLATE NOCASE,s.created_at,s.id"
+        )
+        evaluation_rows = await _all(database,
+            "SELECT u.group_no,u.full_name,u.phone,e.content,"
+            "COALESCE(c.full_name,'Không rõ') AS evaluator_name,e.created_at "
+            "FROM evaluations e JOIN users u ON u.id=e.member_id "
+            "LEFT JOIN users c ON c.id=e.evaluator_id "
+            "WHERE e.is_deleted=0 AND u.role='member' AND u.registration_status='approved' "
+            "ORDER BY u.group_no,u.full_name COLLATE NOCASE,e.created_at,e.id"
+        )
+        summary_data = []
+        for member in members:
+            summary_data.append([
+                "Tổ " + str(member["group_no"]),
+                member["full_name"],
+                member["phone"],
+                "Đang hoạt động" if int(member["is_active"]) else "Đã khóa",
+                float(member["total_points"] or 0),
+                int(member["score_count"] or 0),
+                float(member["positive_points"] or 0),
+                float(member["negative_points"] or 0),
+                int(member["evaluation_count"] or 0),
+                member["created_at"],
+            ])
+        score_data = [[
+            "Tổ " + str(row["group_no"]),row["full_name"],row["phone"],
+            float(row["points"]),row["category"],row["note"],row["creator_name"],row["created_at"]
+        ] for row in score_rows]
+        evaluation_data = [[
+            "Tổ " + str(row["group_no"]),row["full_name"],row["phone"],
+            row["content"],row["evaluator_name"],row["created_at"]
+        ] for row in evaluation_rows]
+        sheets = [
+            ("Tổng hợp",["Tổ","Họ và tên","Số điện thoại","Trạng thái","Tổng điểm","Số lần ghi điểm","Điểm cộng","Điểm trừ","Số nhận xét","Ngày tạo tài khoản"],summary_data,[9,26,17,17,13,16,14,14,14,21]),
+            ("Lịch sử điểm",["Tổ","Họ và tên","Số điện thoại","Điểm (+/-)","Loại điểm","Lý do / minh chứng","Người ghi điểm","Thời gian"],score_data,[9,25,17,13,18,50,24,21]),
+            ("Nhận xét",["Tổ","Họ và tên","Số điện thoại","Nội dung nhận xét","Người nhận xét","Thời gian"],evaluation_data,[9,25,17,55,24,21]),
+        ]
+        workbook = _build_xlsx(sheets)
+        await _audit(database,int(actor["id"]),"export_merit_excel",None,
+            "Xuất Excel: " + str(len(members)) + " thành viên, " + str(len(score_rows)) + " lượt ghi điểm, " + str(len(evaluation_rows)) + " nhận xét.")
+        )
+        headers = Headers.new()
+        headers.set("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        headers.set("Content-Disposition",'attachment; filename="diem-thi-dua-lop-' + time.strftime("%Y%m%d-%H%M%S",time.gmtime()) + '.xlsx"')
+        headers.set("Cache-Control","no-store")
+        headers.set("X-Content-Type-Options","nosniff")
+        headers.set("Referrer-Policy","same-origin")
+        return JSResponse.new(_u8(workbook),_obj(status=200,headers=headers))
+
     async def _api(self,request,path):
         method=request.method.upper()
         database=self.env.DB
@@ -289,6 +464,13 @@ class Default(WorkerEntrypoint):
             return _response({"user":_public_user(actor)})
         if path=="/api/dashboard" and method=="GET":
             return _response(await self._dashboard(actor))
+
+        if path=="/api/export/merit.xlsx":
+            if actor["role"] not in ("founder","teacher"):
+                return _response({"error":"Chỉ Người sáng lập và Giáo viên chủ nhiệm được xuất dữ liệu Excel."},403)
+            if method != "GET":
+                return _response({"error":"Phương thức không được hỗ trợ."},405)
+            return await self._export_merit_excel(actor)
 
         if path=="/api/accounts" and method=="GET":
             if actor["role"]=="member":
