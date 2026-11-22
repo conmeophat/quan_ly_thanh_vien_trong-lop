@@ -2,7 +2,7 @@
 from __future__ import annotations
 import base64, hmac, json, re, secrets, time
 from urllib.parse import urlparse
-from js import Object, Response as JSResponse, Uint8Array, crypto
+from js import Headers, Object, Response as JSResponse, Uint8Array, crypto
 from pyodide.ffi import to_js, to_py
 from workers import WorkerEntrypoint
 
@@ -30,7 +30,7 @@ def _unb64(value):
     return base64.urlsafe_b64decode(value + ("=" * (-len(value) % 4)))
 
 def _response(data, status=200, cookie=None):
-    headers = Object.new()
+    headers = Headers.new()
     headers.set("Content-Type", "application/json; charset=utf-8")
     headers.set("Cache-Control", "no-store")
     headers.set("X-Content-Type-Options", "nosniff")
