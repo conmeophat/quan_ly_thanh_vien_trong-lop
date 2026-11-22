@@ -18,6 +18,28 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Compile Python sources
         run: python -m compileall -q main.py database.py security.py test_permissions.py deploy/windows-standby/sqlite_tools.py
+      - name: Compile Cloudflare Python Worker
+        run: python -m py_compile cloudflare/worker.py
+      - name: Validate Cloudflare frontend JavaScript
+        run: node --check cloudflare/public/app.js
+      - name: Validate Cloudflare D1 schema
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sqlite3
+
+          connection = sqlite3.connect(":memory:")
+          connection.executescript(pathlib.Path("cloudflare/migrations/0001_initial.sql").read_text(encoding="utf-8"))
+          expected = {"users", "score_entries", "evaluations", "login_throttle", "audit_logs"}
+          actual = {
+              row[0]
+              for row in connection.execute(
+                  "SELECT name FROM sqlite_master WHERE type='table'"
+              )
+          }
+          assert expected <= actual, f"Missing D1 tables: {expected - actual}"
+          print("D1 schema OK:", ", ".join(sorted(expected)))
+          PY
       - name: Validate shell deployment scripts
         run: find deploy/oracle -name '*.sh' -print0 | xargs -0 -n1 bash -n
       - name: Run permission tests
