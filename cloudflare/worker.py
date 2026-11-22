@@ -256,7 +256,7 @@ class Default(WorkerEntrypoint):
                 raise ValueError("Số điện thoại đã được đăng ký hoặc không hợp lệ.") from exc
             registered=await _first(database,"SELECT id FROM users WHERE phone=?",phone)
             if registered:
-                await _audit(database,int(registered["id"]),"member_registration",int(registered["id"]),name+" | "+phone+" | Tổ "+str(group_no))
+                await _audit(database,None,"member_registration",int(registered["id"]),name+" | "+phone+" | Tổ "+str(group_no))
             return _response({"ok":True,"message":"Đã gửi đăng ký. Người sáng lập sẽ nhận được thông báo trong Class Merit Hub; vui lòng chờ duyệt."},201)
 
         if path=="/api/login" and method=="POST":
@@ -398,8 +398,6 @@ class Default(WorkerEntrypoint):
                     return _response({"ok":True})
 
         if path=="/api/password/change" and method=="POST":
-            if actor["role"] not in ("founder","teacher"):
-                return _response({"error":"Vai trò này cần liên hệ Người sáng lập hoặc Giáo viên để đổi mật khẩu."},403)
             body=await self._json_body(request)
             if not await _verify_password(str(body.get("old_password") or ""),actor["password_hash"]):
                 return _response({"error":"Mật khẩu hiện tại không đúng."},400)
@@ -483,6 +481,6 @@ class Default(WorkerEntrypoint):
         if path=="/api/audit" and method=="GET":
             if actor["role"]!="founder":
                 return _response({"error":"Chỉ Người sáng lập được xem nhật ký quản trị."},403)
-            rows=await _all(database,"SELECT a.id,a.action,a.details,a.created_at,u.full_name AS actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 100")
+            rows=await _all(database,"SELECT a.id,a.action,a.details,a.created_at,COALESCE(u.full_name,'Hệ thống') AS actor_name FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 100")
             return _response({"logs":rows})
         return _response({"error":"Không tìm thấy API."},404)
