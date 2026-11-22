@@ -328,7 +328,24 @@ class Default(WorkerEntrypoint):
             await _audit(database,int(actor["id"]),"create_account",int(created["id"]),role)
             return _response({"ok":True},201)
 
-        if path.startswith("/api/accounts/") and method in ("POST","PUT"):
+        if path.startswith("/api/accounts/") and method in ("POST","PUT","DELETE"):
+            parts=path.strip("/").split("/")
+            if len(parts)==3 and method=="DELETE":
+                if actor["role"]!="founder":
+                    return _response({"error":"Chỉ Người sáng lập được xóa tài khoản."},403)
+                target_id=int(parts[2])
+                target=await _first(database,"SELECT * FROM users WHERE id=?",target_id)
+                if not target:
+                    raise ValueError("Không tìm thấy tài khoản.")
+                if target["role"]=="founder":
+                    return _response({"error":"Không thể xóa tài khoản Người sáng lập."},403)
+                if not target["is_active"]:
+                    raise ValueError("Tài khoản này đã được xóa trước đó.")
+                await _run(database,"UPDATE users SET is_active=0,session_version=session_version+1,registration_status=CASE WHEN registration_status='pending' THEN 'rejected' ELSE registration_status END WHERE id=?",target_id)
+                await _audit(database,int(actor["id"]),"delete_account",target_id,target["full_name"]+" | "+ROLE_LABELS.get(target["role"],target["role"]))
+                return _response({"ok":True,"message":"Tài khoản đã bị vô hiệu hóa; dữ liệu thi đua được giữ lại."})
+            if len(parts)==4:
+
             parts=path.strip("/").split("/")
             if len(parts)==4:
                 target_id=int(parts[2])
@@ -428,6 +445,26 @@ class Default(WorkerEntrypoint):
                 return _response({"error":"Bạn không có quyền xóa nhận xét."},403)
             await _run(database,"UPDATE evaluations SET is_deleted=1,deleted_by=?,deleted_at=CURRENT_TIMESTAMP WHERE id=?",int(actor["id"]),evaluation_id)
             await _audit(database,int(actor["id"]),"delete_evaluation",int(evaluation["member_id"]))
+            return _response({"ok":True})
+
+        if path=="/api/audit" and method=="DELETE":
+            if actor["role"]!="founder":
+                return _response({"error":"Chỉ Người sáng lập được xóa nhật ký quản trị."},403)
+            count=await _first(database,"SELECT COUNT(*) AS total FROM audit_logs")
+            deleted_count=int(count["total"] or 0)
+            await _run(database,"DELETE FROM audit_logs")
+            await _audit(database,int(actor["id"]),"clear_audit_logs",None,"Đã xóa "+str(deleted_count)+" nhật ký trước đó.")
+            return _response({"ok":True,"deleted_count":deleted_count})
+
+        if path.startswith("/api/audit/") and method=="DELETE":
+            if actor["role"]!="founder":
+                return _response({"error":"Chỉ Người sáng lập được xóa nhật ký quản trị."},403)
+            log_id=int(path.rsplit("/",1)[1])
+            log=await _first(database,"SELECT id,action,target_user_id FROM audit_logs WHERE id=?",log_id)
+            if not log:
+                raise ValueError("Không tìm thấy nhật ký.")
+            await _run(database,"DELETE FROM audit_logs WHERE id=?",log_id)
+            await _audit(database,int(actor["id"]),"delete_audit_log",log.get("target_user_id"),"Đã xóa nhật ký #"+str(log_id)+" ("+str(log["action"])+").")
             return _response({"ok":True})
 
         if path=="/api/audit" and method=="GET":

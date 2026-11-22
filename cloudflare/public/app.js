@@ -20,10 +20,18 @@ function personal(d){return '<div class="grid"><div class="stat"><span>Tổng đ
 async function member(id){try{let d=await api("/api/members/"+id),edit=me.role!=="member";app.innerHTML='<div class="row between"><div><h1>'+esc(d.member.full_name)+'</h1><p class="muted">Tổ '+d.member.group_no+' · '+esc(d.member.phone)+'</p></div><button class="btn alt" id="back">Quay lại</button></div><div class="grid"><div class="stat"><span>Tổng điểm</span><strong>'+n(d.total_points)+'</strong></div><div class="stat"><span>Lần ghi điểm</span><strong>'+d.scores.length+'</strong></div><div class="stat"><span>Nhận xét</span><strong>'+d.evaluations.length+'</strong></div><div class="stat"><span>Tổ</span><strong>'+d.member.group_no+'</strong></div></div><section class="card"><h2>Lịch sử điểm</h2>'+scores(d.scores,edit)+'</section><section class="card"><h2>Nhận xét</h2>'+evaluations(d.evaluations,edit)+'</section>'+(edit?'<section class="card"><h2>Cập nhật thi đua</h2><form id="score" class="form"><label class="field">Điểm cộng/trừ<input name="points" type="number" min="-100" max="100" step=".5" required></label><label class="field">Loại điểm<select name="category"><option>Nề nếp</option><option>Học tập</option><option>Hoạt động</option><option>Kỷ luật</option><option>Khen thưởng</option><option>Khác</option></select></label><label class="field">Lý do/minh chứng<textarea name="note" required minlength="3" maxlength="500"></textarea></label><button class="btn">Lưu điểm</button></form><form id="evaluation" class="form"><label class="field">Nhận xét<textarea name="content" required minlength="3" maxlength="1000"></textarea></label><button class="btn alt">Lưu nhận xét</button></form></section>':"");document.querySelector("#back").onclick=dashboard;app.querySelectorAll("[data-score]").forEach(b=>b.onclick=async()=>{try{await api("/api/scores/"+b.dataset.score,"DELETE",{});member(id)}catch(e){toast(e.message)}});app.querySelectorAll("[data-eval]").forEach(b=>b.onclick=async()=>{try{await api("/api/evaluations/"+b.dataset.eval,"DELETE",{});member(id)}catch(e){toast(e.message)}});if(edit){document.querySelector("#score").onsubmit=async e=>{e.preventDefault();try{await api("/api/members/"+id+"/scores","POST",fd(e.target));toast("Đã lưu điểm");member(id)}catch(x){toast(x.message)}};document.querySelector("#evaluation").onsubmit=async e=>{e.preventDefault();try{await api("/api/members/"+id+"/evaluations","POST",fd(e.target));toast("Đã lưu nhận xét");member(id)}catch(x){toast(x.message)}}}}catch(e){toast(e.message)}}
 function scores(a,del){return a.length?a.map(s=>'<div class="record"><div class="row between"><b class="'+(s.points<0?"negative":"points")+'">'+(s.points>0?"+":"")+n(s.points)+' điểm</b><small>'+esc(s.created_at)+'</small></div><p><b>'+esc(s.category)+'</b> · '+esc(s.note)+'</p>'+(del?'<button class="btn link" data-score="'+s.id+'">Ẩn</button>':"")+'</div>').join(""):'<div class="empty">Chưa có dữ liệu điểm.</div>'}
 function evaluations(a,del){return a.length?a.map(x=>'<div class="record"><p>'+esc(x.content)+'</p><small>'+esc(x.created_at)+'</small>'+(del?'<button class="btn link" data-eval="'+x.id+'">Ẩn nhận xét</button>':"")+'</div>').join(""):'<div class="empty">Chưa có nhận xét.</div>'}
-function accounts(el,pending){
+async function accounts(el,pending){
 const canCreateTeacher=me.role==="founder";
-const roleOptions='<option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"");
-el.innerHTML='<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role">'+roleOptions+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
+let accountData;
+try{accountData=await api("/api/accounts")}catch(e){el.innerHTML='<section class="card">'+esc(e.message)+'</section>';return}
+const accountRows=accountData.accounts||[];
+const accountsHtml=accountRows.length?accountRows.map(x=>{
+const status=!x.is_active?"Đã xóa":x.registration_status==="pending"?"Chờ duyệt":x.registration_status==="rejected"?"Đã từ chối":"Đang hoạt động";
+const group=x.group_no?"Tổ "+x.group_no:"Không thuộc tổ";
+const removeButton=me.role==="founder"&&x.role!=="founder"&&x.is_active?'<button class="btn red" data-delete-account="'+x.id+'" data-account-name="'+esc(x.full_name)+'">Xóa tài khoản</button>':"";
+return '<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · '+esc(x.role_label||roles[x.role]||x.role)+' · '+esc(group)+' · '+esc(status)+'</small></div>'+removeButton+'</div>';
+}).join(""):'<div class="empty">Chưa có tài khoản.</div>';
+el.innerHTML='<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
 const roleSelect=el.querySelector("#create-role");
 const groupField=el.querySelector("#group-field");
 const groupSelect=el.querySelector('[name="group_no"]');
@@ -38,9 +46,28 @@ if(isTeacher)groupSelect.value="";
 }
 roleSelect.addEventListener("change",syncRoleFields);
 syncRoleFields();
-el.querySelectorAll("[data-approve]").forEach(b=>b.onclick=async()=>{try{await api("/api/accounts/"+b.dataset.approve+"/approve","POST",{});dashboard()}catch(e){toast(e.message)}});
-el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=async()=>{if(!confirm("Từ chối đăng ký?"))return;try{await api("/api/accounts/"+b.dataset.reject+"/reject","POST",{});dashboard()}catch(e){toast(e.message)}});
-document.querySelector("#create").onsubmit=async e=>{e.preventDefault();try{const data=fd(e.target);if(data.role==="teacher")delete data.group_no;await api("/api/accounts","POST",data);toast("Đã tạo tài khoản");e.target.reset();syncRoleFields()}catch(x){toast(x.message)}};
+el.querySelectorAll("[data-approve]").forEach(b=>b.onclick=async()=>{try{await api("/api/accounts/"+b.dataset.approve+"/approve","POST",{});await dashboard()}catch(e){toast(e.message)}});
+el.querySelectorAll("[data-reject]").forEach(b=>b.onclick=async()=>{if(!confirm("Từ chối đăng ký?"))return;try{await api("/api/accounts/"+b.dataset.reject+"/reject","POST",{});await dashboard()}catch(e){toast(e.message)}});
+el.querySelectorAll("[data-delete-account]").forEach(b=>b.onclick=async()=>{
+if(!confirm('Xóa tài khoản "'+b.dataset.accountName+'"? Người này sẽ không thể đăng nhập nữa. Lịch sử điểm và nhận xét sẽ được giữ lại.'))return;
+try{await api("/api/accounts/"+b.dataset.deleteAccount,"DELETE",{});toast("Đã xóa tài khoản (đã khóa đăng nhập).");await dashboard()}catch(e){toast(e.message)}
+});
+document.querySelector("#create").onsubmit=async e=>{e.preventDefault();try{const data=fd(e.target);if(data.role==="teacher")delete data.group_no;await api("/api/accounts","POST",data);toast("Đã tạo tài khoản");await dashboard()}catch(x){toast(x.message)}};
 }
-async function audit(el){try{let d=await api("/api/audit");el.innerHTML='<section class="card"><h2>Nhật ký quản trị</h2>'+(d.logs.length?d.logs.map(x=>'<div class="record"><b>'+esc(x.action)+'</b><p>'+esc(x.details)+'</p><small>'+esc(x.actor_name)+' · '+esc(x.created_at)+'</small></div>').join(""):'<div class="empty">Chưa có nhật ký.</div>')+'</section>'}catch(e){el.innerHTML='<div class="card">'+esc(e.message)+'</div>'}}
+async function audit(el){
+try{
+let d=await api("/api/audit");
+el.innerHTML='<section class="card"><div class="row between"><div><h2>Nhật ký quản trị</h2><p class="muted">Xóa một mục hoặc dọn toàn bộ nhật ký. Hệ thống vẫn lưu lại thao tác xóa để bảo đảm khả năng truy vết.</p></div>'+(d.logs.length?'<button class="btn red" id="clear-audit">Xóa toàn bộ nhật ký</button>':"")+'</div>'+(d.logs.length?d.logs.map(x=>'<div class="record"><div class="row between"><b>'+esc(x.action)+'</b><small>'+esc(x.created_at)+'</small></div><p>'+esc(x.details)+'</p><small>'+esc(x.actor_name)+'</small><div><button class="btn link" data-delete-audit="'+x.id+'">Xóa nhật ký này</button></div></div>').join(""):'<div class="empty">Chưa có nhật ký.</div>')+'</section>';
+el.querySelectorAll("[data-delete-audit]").forEach(b=>b.onclick=async()=>{
+if(!confirm("Xóa nhật ký này? Hệ thống sẽ ghi thêm một dòng để ghi nhận thao tác xóa."))return;
+try{await api("/api/audit/"+b.dataset.deleteAudit,"DELETE",{});toast("Đã xóa nhật ký.");await audit(el)}catch(e){toast(e.message)}
+});
+const clearButton=el.querySelector("#clear-audit");
+if(clearButton)clearButton.onclick=async()=>{
+if(!confirm("Bạn chắc chắn muốn xóa toàn bộ nhật ký hiện có? Hệ thống sẽ giữ lại một dòng ghi nhận việc dọn nhật ký."))return;
+try{await api("/api/audit","DELETE",{});toast("Đã dọn nhật ký cũ.");await audit(el)}catch(e){toast(e.message)}
+};
+}catch(e){el.innerHTML='<div class="card">'+esc(e.message)+'</div>'}
+}
+
 start();
