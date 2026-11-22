@@ -39,7 +39,7 @@ function register(){authForm("Đăng ký thành viên","Tài khoản mới luôn
 function bootstrap(){authForm("Thiết lập người sáng lập","Nhập mã FOUNDER_SETUP_TOKEN đã đặt trong Cloudflare Secrets.",field("Mã thiết lập","setup_token","password")+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password"),"Tạo tài khoản",async d=>{await api("/api/bootstrap","POST",d);toast("Đã tạo tài khoản người sáng lập.");await start()})}
 async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;bar();await dashboard();return}catch{}userbar.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
 function bar(){
-  const initials=String(me.full_name||"").trim().split(/\\s+/).slice(-2).map(x=>x[0]||"").join("").toUpperCase();
+  const initials=String(me.full_name||"").trim().split(/\s+/).slice(-2).map(x=>x[0]||"").join("").toUpperCase();
   userbar.innerHTML='<div class="user-menu"><div class="user-avatar" aria-hidden="true">'+esc(initials||"TV")+'</div><div class="user-identity"><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div><button class="btn logout-btn" id="logout" type="button"><span aria-hidden="true">↪</span> Đăng xuất</button></div>';
   document.querySelector("#logout").onclick=async()=>{stopRegistrationWatch();try{await api("/api/logout","POST",{})}finally{me=null;start()}}
 }
