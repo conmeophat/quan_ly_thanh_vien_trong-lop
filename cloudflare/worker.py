@@ -414,8 +414,8 @@ class Default(WorkerEntrypoint):
                 if len(parts)==3 and method=="GET":
                     return _response(await self._member_records(member_id))
                 if len(parts)==4 and parts[3]=="scores" and method=="POST":
-                    if actor["role"]=="member":
-                        return _response({"error":"Thành viên không được tự cộng hoặc trừ điểm."},403)
+                    if actor["role"] not in ("founder","teacher","leader"):
+                        return _response({"error":"Vai trò này không được phép cộng hoặc trừ điểm."},403)
                     body=await self._json_body(request)
                     points=float(body.get("points",0))
                     if points==0 or points < -100 or points > 100:
@@ -426,8 +426,8 @@ class Default(WorkerEntrypoint):
                     await _audit(database,int(actor["id"]),"add_score",member_id,str(points)+" | "+category)
                     return _response({"ok":True},201)
                 if len(parts)==4 and parts[3]=="evaluations" and method=="POST":
-                    if actor["role"]=="member":
-                        return _response({"error":"Thành viên không được tự viết nhận xét."},403)
+                    if actor["role"] not in ("founder","teacher","leader"):
+                        return _response({"error":"Vai trò này không được phép viết nhận xét."},403)
                     body=await self._json_body(request)
                     content=_clean(body.get("content"),"Nhận xét",3,1000)
                     await _run(database,"INSERT INTO evaluations(member_id,content,evaluator_id) VALUES(?,?,?)",member_id,content,int(actor["id"]))
@@ -440,8 +440,8 @@ class Default(WorkerEntrypoint):
             if not score:
                 raise ValueError("Không tìm thấy bản ghi điểm.")
             await self._member_allowed(actor,int(score["member_id"]))
-            if actor["role"]=="member":
-                return _response({"error":"Bạn không có quyền xóa điểm."},403)
+            if actor["role"] not in ("founder","teacher","leader"):
+                return _response({"error":"Vai trò này không được phép xóa điểm."},403)
             await _run(database,"UPDATE score_entries SET is_deleted=1,deleted_by=?,deleted_at=CURRENT_TIMESTAMP WHERE id=?",int(actor["id"]),score_id)
             await _audit(database,int(actor["id"]),"delete_score",int(score["member_id"]))
             return _response({"ok":True})
@@ -452,8 +452,8 @@ class Default(WorkerEntrypoint):
             if not evaluation:
                 raise ValueError("Không tìm thấy nhận xét.")
             await self._member_allowed(actor,int(evaluation["member_id"]))
-            if actor["role"]=="member":
-                return _response({"error":"Bạn không có quyền xóa nhận xét."},403)
+            if actor["role"] not in ("founder","teacher","leader"):
+                return _response({"error":"Vai trò này không được phép xóa nhận xét."},403)
             await _run(database,"UPDATE evaluations SET is_deleted=1,deleted_by=?,deleted_at=CURRENT_TIMESTAMP WHERE id=?",int(actor["id"]),evaluation_id)
             await _audit(database,int(actor["id"]),"delete_evaluation",int(evaluation["member_id"]))
             return _response({"ok":True})
