@@ -254,7 +254,10 @@ class Default(WorkerEntrypoint):
                 await _run(database,"INSERT INTO users(full_name,phone,password_hash,role,group_no,is_active,registration_status) VALUES(?,?,?,'member',?,1,'pending')",name,phone,password_hash,group_no)
             except Exception as exc:
                 raise ValueError("Số điện thoại đã được đăng ký hoặc không hợp lệ.") from exc
-            return _response({"ok":True,"message":"Đã gửi đăng ký. Vui lòng chờ Người sáng lập duyệt."},201)
+            registered=await _first(database,"SELECT id FROM users WHERE phone=?",phone)
+            if registered:
+                await _audit(database,int(registered["id"]),"member_registration",int(registered["id"]),name+" | "+phone+" | Tổ "+str(group_no))
+            return _response({"ok":True,"message":"Đã gửi đăng ký. Người sáng lập sẽ nhận được thông báo trong Class Merit Hub; vui lòng chờ duyệt."},201)
 
         if path=="/api/login" and method=="POST":
             body=await self._json_body(request)
@@ -370,10 +373,23 @@ class Default(WorkerEntrypoint):
                         return _response({"error":"Bạn không có quyền đặt lại mật khẩu."},403)
                     if actor["role"]=="teacher" and target["role"] in ("founder","teacher"):
                         return _response({"error":"Giáo viên không được thay đổi tài khoản Người sáng lập hoặc giáo viên khác."},403)
-                    password_hash=await _hash_password(str(body.get("new_password") or ""))
+                    generated_password = "new_password" not in body
+                    if generated_password:
+                        if actor["role"] != "founder":
+                            return _response({"error":"Chỉ Người sáng lập được cấp mật khẩu tạm tự động."},403)
+                        if target["role"] != "member" or not target["is_active"] or target["registration_status"] != "approved":
+                            return _response({"error":"Chỉ có thể cấp mật khẩu tạm cho thành viên đã được duyệt và đang hoạt động."},400)
+                        new_password = secrets.token_urlsafe(12)
+                    else:
+                        new_password = str(body.get("new_password") or "")
+                    password_hash=await _hash_password(new_password)
                     await _run(database,"UPDATE users SET password_hash=?,session_version=session_version+1 WHERE id=?",password_hash,target_id)
-                    await _audit(database,int(actor["id"]),"reset_password",target_id)
-                    return _response({"ok":True})
+                    details = "Đã cấp mật khẩu tạm; mật khẩu cũ và các phiên đăng nhập trước đã bị thu hồi." if generated_password else ""
+                    await _audit(database,int(actor["id"]),"reset_password",target_id,details)
+                    response = {"ok":True}
+                    if generated_password:
+                        response["temporary_password"] = new_password
+                    return _response(response)
                 if action=="deactivate":
                     if actor["role"]!="founder" or target["role"]=="founder":
                         return _response({"error":"Chỉ Người sáng lập được khóa tài khoản khác."},403)
