@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64, hmac, json, re, secrets, time
 from urllib.parse import urlparse
 from js import Headers, Object, Response as JSResponse, Uint8Array, crypto
-from pyodide.ffi import to_js, to_py
+from pyodide.ffi import to_js
 from workers import WorkerEntrypoint
 
 SESSION_COOKIE = "cmh_session"
@@ -96,14 +96,14 @@ async def _first(database, sql, *params):
     if params:
         statement = statement.bind(*params)
     value = await statement.first()
-    return None if value is None else to_py(value)
+    return None if value is None else value.to_py()
 
 async def _all(database, sql, *params):
     statement = database.prepare(sql)
     if params:
         statement = statement.bind(*params)
     result = await statement.all()
-    return list(to_py(result.results))
+    return list(result.results.to_py())
 
 async def _run(database, sql, *params):
     statement = database.prepare(sql)
