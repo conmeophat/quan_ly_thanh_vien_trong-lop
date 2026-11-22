@@ -8,7 +8,7 @@
   "d1_databases": [{
     "binding": "DB",
     "database_name": "quan-ly-diem-thi-dua",
-    "database_id": "00000000-0000-0000-0000-000000000000",
+    "database_id": "ec3b0d47-79e5-40cd-8296-c43549aed19f",
     "migrations_dir": "migrations"
   }],
   "observability": {"enabled": true}
