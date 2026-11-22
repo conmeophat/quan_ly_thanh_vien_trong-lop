@@ -7,7 +7,7 @@
   "assets": {"directory": "./public", "binding": "ASSETS", "run_worker_first": ["/api/*"]},
   "d1_databases": [{
     "binding": "DB",
-    "database_name": "class-merit-hub",
+    "database_name": "quan-ly-diem-thi-dua",
     "database_id": "00000000-0000-0000-0000-000000000000",
     "migrations_dir": "migrations"
   }],
