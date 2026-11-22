@@ -1,4 +1,27 @@
 const app=document.querySelector("#app"),userbar=document.querySelector("#userbar");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null;
+
+// Ngăn menu chuột phải và các phím tắt mở DevTools thông dụng với Thành viên/Tổ trưởng.
+// Đây chỉ là biện pháp hạn chế ở giao diện; quyền sửa điểm luôn được xác thực tại Worker.
+function isRestrictedRole(){return !!me&&["member","leader"].includes(me.role)}
+document.addEventListener("contextmenu",event=>{
+  if(!isRestrictedRole())return;
+  event.preventDefault();
+  toast("Menu chuột phải đã bị tắt đối với tài khoản Thành viên/Tổ trưởng.");
+},true);
+document.addEventListener("keydown",event=>{
+  if(!isRestrictedRole())return;
+  const key=String(event.key||"").toLowerCase();
+  const modifier=event.ctrlKey||event.metaKey;
+  const inspectShortcut=key==="f12"
+    ||(modifier&&event.shiftKey&&["i","j","c"].includes(key))
+    ||(modifier&&key==="u")
+    ||key==="contextmenu"
+    ||(event.shiftKey&&key==="f10");
+  if(!inspectShortcut)return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  toast("Phím tắt công cụ nhà phát triển đã bị hạn chế.");
+},true);
 const roles={founder:"Người sáng lập",teacher:"Giáo viên chủ nhiệm",leader:"Tổ trưởng",member:"Thành viên"};
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const n=v=>Number(v||0).toLocaleString("vi-VN",{maximumFractionDigits:2});
