@@ -1,8 +1,8 @@
 """Cloudflare Python Worker backend for Class Merit Hub."""
 from __future__ import annotations
-import base64, hmac, json, re, secrets, time
+import base64, hmac, json, re, secrets, time, traceback
 from urllib.parse import urlparse
-from js import Headers, Object, Response as JSResponse, Uint8Array, crypto
+from js import Headers, Object, Response as JSResponse, Uint8Array, crypto, console
 from pyodide.ffi import to_js
 from workers import WorkerEntrypoint
 
@@ -125,7 +125,8 @@ class Default(WorkerEntrypoint):
                 return await self._api(request, path)
             except ValueError as exc:
                 return _response({"error":str(exc)},400)
-            except Exception:
+            except Exception as exc:
+                console.error("Class Merit Hub API error", path, repr(exc), traceback.format_exc())
                 return _response({"error":"Đã xảy ra lỗi máy chủ. Vui lòng thử lại."},500)
         return await self.env.ASSETS.fetch(request)
 
