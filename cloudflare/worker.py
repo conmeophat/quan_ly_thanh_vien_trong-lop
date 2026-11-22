@@ -96,14 +96,14 @@ async def _first(database, sql, *params):
     if params:
         statement = statement.bind(*params)
     value = await statement.first()
-    return None if value is None else value.to_py()
+    return value
 
 async def _all(database, sql, *params):
     statement = database.prepare(sql)
     if params:
         statement = statement.bind(*params)
     result = await statement.all()
-    return list(result.results.to_py())
+    return result["results"]
 
 async def _run(database, sql, *params):
     statement = database.prepare(sql)
