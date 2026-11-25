@@ -302,7 +302,7 @@ async function accounts(el,pending){
   const resetAllButton=el.querySelector("#reset-all-student-passwords");
   if(resetAllButton)resetAllButton.onclick=async()=>{
     const count=resettableAccounts.length;
-    if(!count){toast("Không có tài khoản học sinh đang hoạt động để cấp lại mật khẩu.");return}
+    if(!count){toast("Không có tài khoản học sinh đang hoạt động để xuất thông tin đăng nhập.");return}
     if(!confirm("Xuất lại file cho "+count+" tài khoản học sinh đang hoạt động? Những tài khoản đã có bản sao mật khẩu hợp lệ sẽ giữ nguyên mật khẩu và phiên đăng nhập. Chỉ tài khoản chưa có bản sao hợp lệ mới được cấp mật khẩu tạm mới. Tiếp tục?"))return;
     const confirmation=window.prompt('Để xác nhận, hãy nhập chính xác: CAP LAI MAT KHAU TOAN LOP');
     if(confirmation!=="CAP LAI MAT KHAU TOAN LOP"){
@@ -319,7 +319,7 @@ async function accounts(el,pending){
         body:JSON.stringify({confirmation:"CAP_LAI_MAT_KHAU_TOAN_LOP"})
       });
       if(!response.ok){
-        let message="Không thể cấp lại mật khẩu.";
+        let message="Không thể xuất lại file thông tin đăng nhập.";
         try{const data=await response.json();message=data.error||message}catch{}
         throw Error(message);
       }
@@ -349,7 +349,7 @@ async function accounts(el,pending){
   if(bulkButton)bulkButton.onclick=async()=>{
     const requiredPhrase="CAP LAI MAT KHAU TOAN LOP";
     if(!confirm("Thao tác này sẽ tạo các tài khoản lớp 12A1 còn thiếu rồi xuất file Excel có mật khẩu hiện đang sử dụng. Những tài khoản đã có bản sao mã hóa hợp lệ sẽ giữ nguyên mật khẩu; tài khoản chưa có bản sao mới được cấp mật khẩu tạm một lần. Các lần xuất sau không đổi mật khẩu. Bạn có muốn tiếp tục?"))return;
-    const confirmation=window.prompt('Để xác nhận việc đổi mật khẩu toàn lớp, hãy nhập chính xác: '+requiredPhrase);
+    const confirmation=window.prompt('Để xác nhận xuất lại thông tin đăng nhập, hãy nhập chính xác: '+requiredPhrase);
     if(confirmation!==requiredPhrase){
       if(confirmation!==null)toast("Nội dung xác nhận không chính xác. Chưa có mật khẩu nào bị thay đổi.");
       return;
@@ -374,7 +374,7 @@ async function accounts(el,pending){
         body:JSON.stringify({confirmation:"CAP_LAI_MAT_KHAU_TOAN_LOP"})
       });
       if(!response.ok){
-        let message="Không thể cấp lại mật khẩu và tạo file Excel.";
+        let message="Không thể tạo tài khoản hoặc xuất file thông tin đăng nhập.";
         try{const data=await response.json();message=data.error||message}catch{}
         throw Error(message);
       }
