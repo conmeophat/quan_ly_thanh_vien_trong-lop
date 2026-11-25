@@ -1,4 +1,4 @@
-const app=document.querySelector("#app"),userbar=document.querySelector("#userbar");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null;
+const app=document.querySelector("#app"),userbar=document.querySelector("#userbar");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null;
 
 // Ngăn menu chuột phải và các phím tắt mở DevTools thông dụng với Thành viên/Tổ trưởng.
 // Đây chỉ là biện pháp hạn chế ở giao diện; quyền sửa điểm luôn được xác thực tại Worker.
@@ -41,10 +41,11 @@ async function start(){try{let status=await api("/api/bootstrap/status");try{me=
 function bar(){
   const initials=String(me.full_name||"").trim().split(/\s+/).slice(-2).map(x=>x[0]||"").join("").toUpperCase();
   userbar.innerHTML='<div class="user-menu"><div class="user-avatar" aria-hidden="true">'+esc(initials||"TV")+'</div><div class="user-identity"><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div><button class="btn logout-btn" id="logout" type="button"><span aria-hidden="true">↪</span> Đăng xuất</button></div>';
-  document.querySelector("#logout").onclick=async()=>{stopRegistrationWatch();try{await api("/api/logout","POST",{})}finally{me=null;start()}}
+  document.querySelector("#logout").onclick=async()=>{stopRegistrationWatch();stopPresenceWatch();try{try{await api("/api/presence/leave","POST",{})}catch{}await api("/api/logout","POST",{})}finally{me=null;start()}}
 }
 async function dashboard(){
   bar();
+  startPresenceWatch();
   try{
     let d=await api("/api/dashboard");
     if(d.personal){
@@ -66,6 +67,7 @@ async function dashboard(){
       (canUpdateWeekly?navButton("weekly","▤","Điểm theo tuần","Nhập điểm từ thứ Hai đến Chủ nhật"):"")+
       (canManage?navButton("accounts","♙","Tài khoản","Duyệt và quản lý",isFounder&&d.pending_members.length?String(d.pending_members.length):""):"")+
       (canManage?navButton("assignments","♜","Phân công tổ","Tổ trưởng và thành viên"):"")+
+      (canManage?navButton("presence","◉","Đang online","Ai đang hoạt động trong lớp"):"")+
       (isFounder?navButton("audit","◷","Nhật ký","Lịch sử hoạt động"):"")+
       '</nav>'+(canManage?'<div class="sidebar-divider"></div><div class="sidebar-section-label">BÁO CÁO</div><a class="side-link export-side-link" href="/api/export/merit.xlsx" download="diem-thi-dua-lop.xlsx" aria-label="Xuất dữ liệu điểm thi đua ra file Excel"><span class="side-icon" aria-hidden="true">⇩</span><span class="side-copy"><strong>Xuất dữ liệu Excel</strong><small>Tải báo cáo điểm của lớp</small></span><span class="side-arrow" aria-hidden="true">↓</span></a>':"")+'<div class="sidebar-divider"></div><div class="sidebar-section-label">CÀI ĐẶT</div><nav class="side-nav">'+
       (canManage?navButton("password","⚙","Đổi mật khẩu","Bảo mật tài khoản"):"")+
@@ -73,7 +75,7 @@ async function dashboard(){
       '<section class="chess-main"><div class="dashboard-head"><div class="page-intro"><p class="eyebrow">TỔNG QUAN LỚP HỌC</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Theo dõi thành tích, điểm số và hoạt động của các tổ trong lớp.</p></div><div class="page-actions"><span class="role-pill">'+esc(roles[me.role])+'</span>'+(isFounder?'<button class="btn alt notification-btn" id="enable-notifications" type="button"><span aria-hidden="true">♧</span> Bật thông báo</button>':"")+'</div></div>'+
       '<div class="grid"><div class="stat"><span>Tổ quản lý</span><strong>'+d.groups.length+'</strong></div><div class="stat"><span>Học sinh trong danh sách</span><strong>'+count+'</strong></div><div class="stat"><span>Tổng điểm</span><strong>'+n(points)+'</strong></div><div class="stat"><span>Chờ duyệt</span><strong>'+d.pending_members.length+'</strong></div></div>'+
       (isFounder&&d.pending_members.length?'<section class="notice-card"><div class="notice-icon" aria-hidden="true">!</div><div class="notice-copy"><strong>Có '+d.pending_members.length+' đăng ký mới đang chờ duyệt</strong><p>Hãy xem thông tin và xác nhận tài khoản trước khi thành viên sử dụng hệ thống.</p></div><button class="btn" type="button" data-tab="accounts">Xem đăng ký <span aria-hidden="true">→</span></button></section>':"")+
-      '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="weekly"?"Điểm thi đua theo tuần":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section></div>';
+      '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="weekly"?"Điểm thi đua theo tuần":tab==="presence"?"Trạng thái online":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section></div>';
     document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{
       tab=b.dataset.tab;
       document.querySelectorAll(".side-link[data-tab]").forEach(x=>{
@@ -82,7 +84,7 @@ async function dashboard(){
         if(active)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current");
       });
       const title=document.querySelector("#workspace-title");
-      if(title)title.textContent=tab==="weekly"?"Điểm thi đua theo tuần":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
+      if(title)title.textContent=tab==="weekly"?"Điểm thi đua theo tuần":tab==="presence"?"Trạng thái online":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
       panel();
     });
     const notifyButton=document.querySelector("#enable-notifications");
@@ -95,7 +97,67 @@ async function dashboard(){
     panel(d);
   }catch(e){app.innerHTML='<div class="card error-card">'+esc(e.message)+'</div>'}
 }
-async function panel(data){if(!data)data=await api("/api/dashboard");let p=document.querySelector("#panel");if(!p)return;if(tab==="weekly"&&["founder","teacher","leader"].includes(me.role))return weeklyPanel(p);if(tab==="accounts"&&["founder","teacher"].includes(me.role))return accounts(p,data.pending_members);if(tab==="assignments"&&["founder","teacher"].includes(me.role))return assignmentsPanel(p);if(tab==="audit"&&me.role==="founder")return audit(p);if(tab==="password"&&["founder","teacher"].includes(me.role))return passwordPanel(p);if(tab==="password")tab="groups";return groups(p,data.groups)}
+async function panel(data){if(presencePanelTimer!==null&&tab!=="presence"){clearInterval(presencePanelTimer);presencePanelTimer=null}if(!data)data=await api("/api/dashboard");let p=document.querySelector("#panel");if(!p)return;if(tab==="presence"&&["founder","teacher"].includes(me.role))return presencePanel(p);if(tab==="weekly"&&["founder","teacher","leader"].includes(me.role))return weeklyPanel(p);if(tab==="accounts"&&["founder","teacher"].includes(me.role))return accounts(p,data.pending_members);if(tab==="assignments"&&["founder","teacher"].includes(me.role))return assignmentsPanel(p);if(tab==="audit"&&me.role==="founder")return audit(p);if(tab==="password"&&["founder","teacher"].includes(me.role))return passwordPanel(p);if(tab==="password")tab="groups";return groups(p,data.groups)}
+function startPresenceWatch(){
+  if(!me||presenceWatchTimer!==null)return;
+  const ping=async()=>{
+    if(!me||document.visibilityState==="hidden")return;
+    try{await api("/api/presence/ping","POST",{})}catch{}
+  };
+  ping();
+  presenceWatchTimer=setInterval(ping,30000);
+}
+function stopPresenceWatch(){
+  if(presenceWatchTimer!==null){clearInterval(presenceWatchTimer);presenceWatchTimer=null}
+  if(presencePanelTimer!==null){clearInterval(presencePanelTimer);presencePanelTimer=null}
+}
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"&&me)api("/api/presence/ping","POST",{}).catch(()=>{});
+});
+function presenceLastSeen(timestamp,serverTime){
+  const value=Number(timestamp||0);
+  if(!value)return "Chưa có lần hoạt động";
+  const seconds=Math.max(0,Number(serverTime)-value);
+  if(seconds<45)return "Vừa hoạt động";
+  if(seconds<60)return seconds+" giây trước";
+  const minutes=Math.floor(seconds/60);
+  if(minutes<60)return minutes+" phút trước";
+  const hours=Math.floor(minutes/60);
+  if(hours<24)return hours+" giờ trước";
+  return new Date(value*1000).toLocaleString("vi-VN",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+}
+async function presencePanel(el){
+  if(presencePanelTimer!==null){clearInterval(presencePanelTimer);presencePanelTimer=null}
+  async function render(){
+    try{
+      const data=await api("/api/presence");
+      const groupHtml=data.groups.map(group=>{
+        const rows=group.members.map(person=>
+          '<div class="presence-person">'+
+            '<div class="presence-person-main"><span class="presence-dot '+(person.online?"is-online":"is-offline")+'"></span>'+
+            '<div class="presence-identity"><strong>'+esc(person.full_name)+'</strong><small>'+esc(person.role_label)+' · Tổ '+group.group_no+'</small></div></div>'+
+            '<span class="presence-state '+(person.online?"is-online":"is-offline")+'">'+(person.online?"Đang online":"Offline")+'</span>'+
+            '<small class="presence-last-seen">'+(person.online?"Hoạt động: ":"Lần cuối: ")+esc(presenceLastSeen(person.last_seen,data.server_time))+'</small>'+
+          '</div>'
+        ).join("");
+        return '<section class="card presence-group-card"><div class="presence-group-heading"><div><span class="group-symbol">T'+group.group_no+'</span><div><p class="eyebrow">TRẠNG THÁI TỔ '+group.group_no+'</p><h3>Tổ '+group.group_no+'</h3></div></div><span class="presence-group-count">'+group.online_count+'/'+group.total+' online</span></div>'+
+          (rows||'<div class="empty">Tổ này chưa có tài khoản thành viên hoạt động.</div>')+'</section>';
+      }).join("");
+      el.innerHTML=
+        '<section class="presence-intro"><div><p class="eyebrow">THEO DÕI HOẠT ĐỘNG</p><h3>Thành viên đang online</h3><p>Tài khoản được tính là online khi có tín hiệu hoạt động trong 90 giây gần nhất. Danh sách tự làm mới sau mỗi 30 giây.</p></div><button class="btn alt" id="presence-refresh" type="button">↻ Làm mới</button></section>'+
+        '<div class="presence-summary"><div class="presence-stat is-online"><small>Đang online</small><strong>'+data.online_count+'</strong></div><div class="presence-stat is-offline"><small>Đang offline</small><strong>'+data.offline_count+'</strong></div><div class="presence-stat"><small>Tổng tài khoản học sinh</small><strong>'+data.total+'</strong></div></div>'+
+        '<div class="presence-groups">'+(groupHtml||'<section class="card"><div class="empty">Chưa có tài khoản học sinh đang hoạt động.</div></section>')+'</div>'+
+        '<p class="presence-footnote">Trạng thái online dựa trên tín hiệu từ trình duyệt, không phải xác nhận chắc chắn rằng người dùng đang nhìn vào màn hình.</p>';
+      el.querySelector("#presence-refresh").onclick=()=>render();
+    }catch(error){
+      el.innerHTML='<section class="card error-card">'+esc(error.message)+'</section>';
+    }
+  }
+  await render();
+  presencePanelTimer=setInterval(()=>{
+    if(tab==="presence"&&el.isConnected)render();
+  },30000);
+}
 function updatePendingRegistrations(items){if(me?.role!=="founder")return;const list=Array.isArray(items)?items:[];if(knownPendingIds===null){knownPendingIds=new Set(list.map(x=>Number(x.id)));return}for(const item of list){const id=Number(item.id);if(!knownPendingIds.has(id)){knownPendingIds.add(id);const message="Có đăng ký mới: "+item.full_name+" · Tổ "+item.group_no;toast(message);if("Notification" in window&&Notification.permission==="granted")new Notification("Class Merit Hub",{body:message})}}}
 function startRegistrationWatch(){if(me?.role!=="founder"||registrationWatchTimer!==null)return;registrationWatchTimer=setInterval(async()=>{try{const latest=await api("/api/dashboard");updatePendingRegistrations(latest.pending_members||[])}catch{}},30000)}
 function stopRegistrationWatch(){if(registrationWatchTimer!==null){clearInterval(registrationWatchTimer);registrationWatchTimer=null}knownPendingIds=null}
