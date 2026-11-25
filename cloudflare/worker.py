@@ -1,6 +1,6 @@
 """Cloudflare Python Worker backend for Class Merit Hub."""
 from __future__ import annotations
-import base64, hmac, io, json, re, secrets, time, traceback, zipfile
+import base64, hmac, io, json, re, secrets, time, traceback, zipfile, unicodedata
 from xml.sax.saxutils import escape
 from urllib.parse import urlparse
 from js import Headers, Object, Response as JSResponse, Uint8Array, crypto, console
@@ -12,6 +12,15 @@ SESSION_TTL = 28800
 # Cloudflare Workers Web Crypto currently rejects PBKDF2 iteration counts above 100,000.
 PBKDF2_ITERATIONS = 100000
 ROLE_LABELS = {"founder":"Người sáng lập","teacher":"Giáo viên chủ nhiệm","leader":"Tổ trưởng","member":"Thành viên"}
+
+# Danh sách lớp 12A1 lấy từ file Word người dùng cung cấp.
+# Tổ 3 không có tên ở STT 7 trong tài liệu nên không tự bổ sung tên.
+CLASS_ROSTER = {
+    1: ["Thành Danh", "Ánh Dương", "Quỳnh Hương", "Hoàng Khang", "Quốc Kiên", "Bảo Ngọc", "Khánh Ngọc", "Phương Quỳnh", "Thanh Toàn", "Huyền Trân", "Đức Triết", "Long Vũ"],
+    2: ["Hồng Hưng", "Minh Đăng", "Tâm Đoan", "Trần Hoàng", "Gia Huy", "Khánh Nam", "Cẩm Phú", "Quang Phúc", "Thuận Thảo", "Gia Thịnh", "Văn Tự", "Đỗ Uyên"],
+    3: ["Kiều Diễm", "Thành Đạt", "Hoàng Hải", "Trần B. Hân", "Huy Hiền", "Minh Hoàng", "Nhật Khánh", "Vĩ Lâm", "Uyên Nhi", "Anh Tuấn", "Tấn Tùng"],
+    4: ["Anh Duy", "Lê Hân", "Lê Ngọc Hân", "Ng. Trần Hân", "Chánh Huy", "Đình Khải", "Minh Khải", "Thiện Khoa", "Quốc Lâm", "Hồng Thịnh", "Quế Trâm", "Hà Việt"],
+}
 
 def _obj(**values):
     result = Object.new()
@@ -63,6 +72,23 @@ def _clean(value, field, minimum, maximum):
     if not minimum <= len(result) <= maximum:
         raise ValueError(field + " phải có từ " + str(minimum) + " đến " + str(maximum) + " ký tự.")
     return result
+
+
+def _name_key(value):
+    normalized = unicodedata.normalize("NFKD", str(value or "").casefold().replace("đ", "d"))
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", normalized).split())
+
+
+def _roster_entry(value):
+    key = _name_key(value)
+    if not key:
+        return None
+    for group_no, names in CLASS_ROSTER.items():
+        for official_name in names:
+            if _name_key(official_name) == key:
+                return group_no, official_name
+    return None
 
 async def _pbkdf2(password, salt):
     key = await crypto.subtle.importKey("raw", _u8(password.encode("utf-8")), _obj(name="PBKDF2"), False, to_js(["deriveBits"]))
@@ -311,13 +337,72 @@ class Default(WorkerEntrypoint):
         groups=[int(actor["group_no"])] if actor["role"]=="leader" else [1,2,3,4]
         group_data=[]
         for group_no in groups:
-            members=await _all(database,"SELECT u.id,u.full_name,u.phone,COALESCE((SELECT SUM(s.points) FROM score_entries s WHERE s.member_id=u.id AND s.is_deleted=0),0) AS total_points FROM users u WHERE u.role='member' AND u.group_no=? AND u.is_active=1 AND u.registration_status='approved' ORDER BY u.full_name COLLATE NOCASE",group_no)
-            group_data.append({"group_no":group_no,"member_count":len(members),"total_points":sum(float(x["total_points"]) for x in members),"members":members})
+            roster_names=CLASS_ROSTER[group_no]
+            roster_keys={_name_key(name) for name in roster_names}
+            rows=await _all(database,
+                "SELECT u.id,u.full_name,u.phone,u.is_active,u.registration_status,u.created_at,"
+                "COALESCE((SELECT SUM(s.points) FROM score_entries s WHERE s.member_id=u.id AND s.is_deleted=0),0) AS total_points "
+                "FROM users u WHERE u.role='member' AND u.group_no=? ORDER BY u.created_at DESC,u.id DESC",
+                group_no
+            )
+            matched={}
+            extras=[]
+            for row in rows:
+                key=_name_key(row["full_name"])
+                if key in roster_keys:
+                    priority=0 if row["is_active"] and row["registration_status"]=="approved" else 1 if row["is_active"] and row["registration_status"]=="pending" else 2
+                    current=matched.get(key)
+                    current_priority=99 if current is None else (0 if current["is_active"] and current["registration_status"]=="approved" else 1 if current["is_active"] and current["registration_status"]=="pending" else 2)
+                    if current is None or priority<current_priority:
+                        matched[key]=row
+                elif row["is_active"] and row["registration_status"]=="approved":
+                    extras.append(row)
+
+            members=[]
+            for official_name in roster_names:
+                row=matched.get(_name_key(official_name))
+                if row and row["is_active"] and row["registration_status"]=="approved":
+                    members.append({
+                        "id":row["id"],"full_name":official_name,"phone":row["phone"],
+                        "total_points":float(row["total_points"] or 0),"status_label":"Đang hoạt động"
+                    })
+                elif row and row["is_active"] and row["registration_status"]=="pending":
+                    members.append({
+                        "id":None,"full_name":official_name,"phone":"",
+                        "total_points":0,"status_label":"Đang chờ duyệt"
+                    })
+                elif row and row["registration_status"]=="rejected":
+                    members.append({
+                        "id":None,"full_name":official_name,"phone":"",
+                        "total_points":0,"status_label":"Đăng ký đã bị từ chối"
+                    })
+                elif row and not row["is_active"]:
+                    members.append({
+                        "id":None,"full_name":official_name,"phone":"",
+                        "total_points":0,"status_label":"Tài khoản đã bị khóa"
+                    })
+                else:
+                    members.append({
+                        "id":None,"full_name":official_name,"phone":"",
+                        "total_points":0,"status_label":"Chưa kích hoạt tài khoản"
+                    })
+
+            for row in extras:
+                members.append({
+                    "id":row["id"],"full_name":row["full_name"],"phone":row["phone"],
+                    "total_points":float(row["total_points"] or 0),"status_label":"Đang hoạt động"
+                })
+            group_data.append({
+                "group_no":group_no,
+                "member_count":len(members),
+                "active_count":sum(1 for member in members if member["id"] is not None),
+                "total_points":sum(float(member["total_points"]) for member in members),
+                "members":members
+            })
         pending=[]
         if actor["role"] in ("founder","teacher"):
             pending=await _all(database,"SELECT id,full_name,phone,group_no,created_at FROM users WHERE role='member' AND registration_status='pending' ORDER BY created_at ASC")
         return {"user":_public_user(actor),"groups":group_data,"pending_members":pending}
-
 
     async def _export_merit_excel(self, actor):
         database = self.env.DB
@@ -420,11 +505,15 @@ class Default(WorkerEntrypoint):
         if path=="/api/register" and method=="POST":
             body=await self._json_body(request)
             name=_clean(body.get("full_name"),"Họ và tên",2,100)
+            roster_member=_roster_entry(name)
+            if roster_member:
+                group_no,name=roster_member
+            else:
+                group_no=int(body.get("group_no",0))
+                if group_no not in (1,2,3,4):
+                    raise ValueError("Vui lòng chọn tổ từ 1 đến 4.")
             phone=_normal_phone(body.get("phone"))
             password_hash=await _hash_password(str(body.get("password") or ""))
-            group_no=int(body.get("group_no",0))
-            if group_no not in (1,2,3,4):
-                raise ValueError("Vui lòng chọn tổ từ 1 đến 4.")
             try:
                 await _run(database,"INSERT INTO users(full_name,phone,password_hash,role,group_no,is_active,registration_status) VALUES(?,?,?,'member',?,1,'pending')",name,phone,password_hash,group_no)
             except Exception as exc:
@@ -496,13 +585,19 @@ class Default(WorkerEntrypoint):
                     return _response({"error":"Giáo viên chỉ được tạo Tổ trưởng hoặc Thành viên."},403)
             elif actor["role"]!="founder":
                 return _response({"error":"Bạn không có quyền tạo tài khoản."},403)
+            name=_clean(body.get("full_name"),"Họ và tên",2,100)
+            roster_member=_roster_entry(name) if role=="member" else None
+            if roster_member:
+                roster_group,name=roster_member
+                if actor["role"]=="leader" and int(actor["group_no"])!=roster_group:
+                    return _response({"error":"Học sinh này thuộc Tổ "+str(roster_group)+", bạn chỉ được tạo tài khoản cho thành viên tổ mình."},403)
+                group_no=roster_group
             if role in ("leader","member"):
                 group_no=int(group_no or 0)
                 if group_no not in (1,2,3,4):
                     raise ValueError("Vui lòng chọn tổ từ 1 đến 4.")
             else:
                 group_no=None
-            name=_clean(body.get("full_name"),"Họ và tên",2,100)
             phone=_normal_phone(body.get("phone"))
             password_hash=await _hash_password(str(body.get("password") or ""))
             try:
@@ -542,10 +637,15 @@ class Default(WorkerEntrypoint):
                     if target["role"]!="member" or target["registration_status"]!="pending":
                         raise ValueError("Tài khoản này không ở trạng thái chờ duyệt.")
                     if action=="approve":
-                        group_no=int(body.get("group_no") or target["group_no"])
+                        roster_member=_roster_entry(target["full_name"])
+                        if roster_member:
+                            group_no,official_name=roster_member
+                        else:
+                            official_name=target["full_name"]
+                            group_no=int(body.get("group_no") or target["group_no"])
                         if group_no not in (1,2,3,4):
                             raise ValueError("Tổ phải nằm trong khoảng 1 đến 4.")
-                        await _run(database,"UPDATE users SET group_no=?,registration_status='approved' WHERE id=?",group_no,target_id)
+                        await _run(database,"UPDATE users SET full_name=?,group_no=?,registration_status='approved' WHERE id=?",official_name,group_no,target_id)
                     else:
                         await _run(database,"UPDATE users SET registration_status='rejected',is_active=0 WHERE id=?",target_id)
                     await _audit(database,int(actor["id"]),action+"_registration",target_id)
