@@ -63,6 +63,16 @@ def _normal_phone(value):
         raise ValueError("Số điện thoại không hợp lệ.")
     return phone
 
+def _normal_login(value):
+    raw = str(value or "").strip()
+    numeric = re.sub(r"[\\s().-]", "", raw)
+    if re.fullmatch(r"\\+?[0-9]{8,16}", numeric):
+        return _normal_phone(raw)
+    username = raw.lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{5,31}", username):
+        raise ValueError("Tên đăng nhập không hợp lệ.")
+    return username
+
 def _password_valid(password):
     if not isinstance(password, str) or len(password) < 8 or len(password) > 128:
         raise ValueError("Mật khẩu phải có từ 8 đến 128 ký tự.")
@@ -459,9 +469,9 @@ class Default(WorkerEntrypoint):
             row["content"],row["evaluator_name"],row["created_at"]
         ] for row in evaluation_rows]
         sheets = [
-            ("Tổng hợp",["Tổ","Họ và tên","Số điện thoại","Trạng thái","Tổng điểm","Số lần ghi điểm","Điểm cộng","Điểm trừ","Số nhận xét","Ngày tạo tài khoản"],summary_data,[9,26,17,17,13,16,14,14,14,21]),
-            ("Lịch sử điểm",["Tổ","Họ và tên","Số điện thoại","Điểm (+/-)","Loại điểm","Lý do / minh chứng","Người ghi điểm","Thời gian"],score_data,[9,25,17,13,18,50,24,21]),
-            ("Nhận xét",["Tổ","Họ và tên","Số điện thoại","Nội dung nhận xét","Người nhận xét","Thời gian"],evaluation_data,[9,25,17,55,24,21]),
+            ("Tổng hợp",["Tổ","Họ và tên","Tên đăng nhập / SĐT","Trạng thái","Tổng điểm","Số lần ghi điểm","Điểm cộng","Điểm trừ","Số nhận xét","Ngày tạo tài khoản"],summary_data,[9,26,17,17,13,16,14,14,14,21]),
+            ("Lịch sử điểm",["Tổ","Họ và tên","Tên đăng nhập / SĐT","Điểm (+/-)","Loại điểm","Lý do / minh chứng","Người ghi điểm","Thời gian"],score_data,[9,25,17,13,18,50,24,21]),
+            ("Nhận xét",["Tổ","Họ và tên","Tên đăng nhập / SĐT","Nội dung nhận xét","Người nhận xét","Thời gian"],evaluation_data,[9,25,17,55,24,21]),
         ]
         workbook = _build_xlsx(sheets)
         await _audit(database,int(actor["id"]),"export_merit_excel",None,
@@ -525,7 +535,7 @@ class Default(WorkerEntrypoint):
 
         if path=="/api/login" and method=="POST":
             body=await self._json_body(request)
-            phone=_normal_phone(body.get("phone"))
+            phone=_normal_login(body.get("phone") or body.get("username"))
             password=str(body.get("password") or "")
             throttle=await _first(database,"SELECT failed_count,locked_until FROM login_throttle WHERE username_key=?",phone)
             now=int(time.time())
@@ -553,6 +563,81 @@ class Default(WorkerEntrypoint):
             return _response({"user":_public_user(actor)})
         if path=="/api/dashboard" and method=="GET":
             return _response(await self._dashboard(actor))
+
+        if path=="/api/accounts/bulk-create-roster" and method=="POST":
+            if actor["role"] != "founder":
+                return _response({"error":"Chỉ Người sáng lập được tạo tài khoản đồng loạt cho lớp."},403)
+            body=await self._json_body(request)
+            group_no=int(body.get("group_no") or 0)
+            if group_no not in (1,2,3,4):
+                raise ValueError("Vui lòng chọn tổ từ 1 đến 4.")
+
+            existing_rows=await _all(database,
+                "SELECT id,full_name,phone,group_no,is_active,registration_status FROM users WHERE role='member'"
+            )
+            target_keys={_name_key(name) for name in CLASS_ROSTER[group_no]}
+            existing_by_name={}
+            for row in existing_rows:
+                key=_name_key(row["full_name"])
+                if key not in target_keys:
+                    continue
+                current=existing_by_name.get(key)
+                priority=0 if row["is_active"] and row["registration_status"]=="approved" else 1 if row["is_active"] and row["registration_status"]=="pending" else 2
+                current_priority=99 if current is None else (0 if current["is_active"] and current["registration_status"]=="approved" else 1 if current["is_active"] and current["registration_status"]=="pending" else 2)
+                if current is None or priority<current_priority:
+                    existing_by_name[key]=row
+
+            entries=[]
+            created_count=0
+            existing_count=0
+            for index,official_name in enumerate(CLASS_ROSTER[group_no],start=1):
+                key=_name_key(official_name)
+                existing=existing_by_name.get(key)
+                if existing:
+                    if int(existing["group_no"]) != group_no:
+                        await _run(database,"UPDATE users SET group_no=? WHERE id=?",group_no,int(existing["id"]))
+                        await _audit(database,int(actor["id"]),"roster_group_corrected",int(existing["id"]),
+                            official_name+" | chuyển về Tổ "+str(group_no))
+                    if not existing["is_active"]:
+                        status="Tài khoản đã khóa — không cấp lại tự động"
+                    elif existing["registration_status"]=="pending":
+                        status="Đã có tài khoản chờ duyệt — giữ nguyên mật khẩu"
+                    elif existing["registration_status"]=="approved":
+                        status="Đã có tài khoản — giữ nguyên mật khẩu"
+                    else:
+                        status="Đăng ký đã bị từ chối — cần kiểm tra"
+                    entries.append({
+                        "group_no":group_no,"stt":index,"full_name":official_name,
+                        "username":existing["phone"],"password":"","status":status
+                    })
+                    existing_count+=1
+                    continue
+
+                username="12a1-t"+str(group_no)+"-"+str(index).zfill(2)
+                collision=await _first(database,"SELECT id FROM users WHERE phone=?",username)
+                if collision:
+                    username=username+"-"+secrets.token_hex(2)
+                    while await _first(database,"SELECT id FROM users WHERE phone=?",username):
+                        username="12a1-t"+str(group_no)+"-"+str(index).zfill(2)+"-"+secrets.token_hex(3)
+                password=secrets.token_urlsafe(12)
+                password_hash=await _hash_password(password)
+                await _run(database,
+                    "INSERT INTO users(full_name,phone,password_hash,role,group_no,is_active,registration_status) VALUES(?,?,?,'member',?,1,'approved')",
+                    official_name,username,password_hash,group_no
+                )
+                created=await _first(database,"SELECT id FROM users WHERE phone=?",username)
+                await _audit(database,int(actor["id"]),"bulk_create_student_account",int(created["id"]),
+                    "Tổ "+str(group_no)+" | "+official_name+" | "+username)
+                entries.append({
+                    "group_no":group_no,"stt":index,"full_name":official_name,
+                    "username":username,"password":password,"status":"Tài khoản mới — đã kích hoạt"
+                })
+                created_count+=1
+
+            return _response({
+                "ok":True,"group_no":group_no,"created_count":created_count,
+                "existing_count":existing_count,"entries":entries
+            },201)
 
         if path=="/api/export/merit.xlsx":
             if actor["role"] not in ("founder","teacher"):
