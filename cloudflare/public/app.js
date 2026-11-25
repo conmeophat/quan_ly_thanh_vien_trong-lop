@@ -1,4 +1,4 @@
-const app=document.querySelector("#app"),userbar=document.querySelector("#userbar");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null;
+const app=document.querySelector("#app"),userbar=document.querySelector("#userbar"),topnav=document.querySelector("#topnav");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null;
 
 // Ngăn menu chuột phải và các phím tắt mở DevTools thông dụng với Thành viên/Tổ trưởng.
 // Đây chỉ là biện pháp hạn chế ở giao diện; quyền sửa điểm luôn được xác thực tại Worker.
@@ -37,10 +37,19 @@ function authForm(title,desc,fields,button,submit,link){
 function login(){authForm("Đăng nhập","Sử dụng tên đăng nhập được cấp hoặc số điện thoại đã đăng ký.",field("Tên đăng nhập hoặc số điện thoại","phone","text","Nhập tên đăng nhập hoặc số điện thoại")+field("Mật khẩu","password","password"),"Đăng nhập",async d=>{await api("/api/login","POST",d);await start()},'<button class="btn link" id="reg">Chưa có tài khoản? Đăng ký</button>');document.querySelector("#reg").onclick=register}
 function register(){authForm("Đăng ký thành viên","Tài khoản mới luôn phải được người quản trị duyệt. Nếu họ tên có trong danh sách lớp, hệ thống sẽ tự xếp đúng tổ theo danh sách.",field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+groupsel()+field("Mật khẩu (8–128 ký tự)","password","password"),"Gửi đăng ký",async d=>{await api("/api/register","POST",d);toast("Đã gửi đăng ký. Vui lòng chờ duyệt.");login()},'<button class="btn link" id="back">Quay lại đăng nhập</button>');document.querySelector("#back").onclick=login}
 function bootstrap(){authForm("Thiết lập người sáng lập","Nhập mã FOUNDER_SETUP_TOKEN đã đặt trong Cloudflare Secrets.",field("Mã thiết lập","setup_token","password")+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password"),"Tạo tài khoản",async d=>{await api("/api/bootstrap","POST",d);toast("Đã tạo tài khoản người sáng lập.");await start()})}
-async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;bar();await dashboard();return}catch{}userbar.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
+async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;bar();await dashboard();return}catch{}userbar.innerHTML="";if(topnav)topnav.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
 function bar(){
   const initials=String(me.full_name||"").trim().split(/\s+/).slice(-2).map(x=>x[0]||"").join("").toUpperCase();
   userbar.innerHTML='<div class="user-menu"><div class="user-avatar" aria-hidden="true">'+esc(initials||"TV")+'</div><div class="user-identity"><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div><button class="btn logout-btn" id="logout" type="button"><span aria-hidden="true">↪</span> Đăng xuất</button></div>';
+  if(topnav){
+    if(me.role==="member")topnav.innerHTML='<span class="fb-topnav-note">BẢNG ĐIỂM CÁ NHÂN</span>';
+    else{
+      const items=[["groups","⌂","Lớp học"]];
+      if(["founder","teacher","leader"].includes(me.role))items.push(["weekly","▤","Điểm tuần"]);
+      if(["founder","teacher"].includes(me.role))items.push(["presence","◉","Đang online"]);
+      topnav.innerHTML=items.map(item=>'<button class="fb-top-link '+(tab===item[0]?"is-active":"")+'" data-tab="'+item[0]+'" type="button" title="'+item[2]+'"><span aria-hidden="true">'+item[1]+'</span><small>'+item[2]+'</small></button>').join("");
+    }
+  }
   document.querySelector("#logout").onclick=async()=>{stopRegistrationWatch();stopPresenceWatch();try{try{await api("/api/presence/leave","POST",{})}catch{}await api("/api/logout","POST",{})}finally{me=null;start()}}
 }
 async function dashboard(){
