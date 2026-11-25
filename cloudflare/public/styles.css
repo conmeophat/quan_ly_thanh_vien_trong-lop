@@ -1755,3 +1755,49 @@ button:focus-visible,.btn:focus-visible{outline:3px solid rgba(8,102,255,.23);ou
 .bulk-credential-reset-card > .btn {
   min-height: 44px;
 }
+
+
+/* Founder-only global website maintenance control */
+.maintenance-control-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 22px;
+  padding: 22px 24px;
+  border: 1px solid #c8d9f7;
+  background: linear-gradient(145deg, #ffffff 0%, #f3f7ff 100%);
+}
+.maintenance-control-card h2 {
+  margin: 3px 0 6px;
+  color: #1b3659;
+  font-size: 19px;
+}
+.maintenance-control-card p {
+  margin: 0;
+}
+.maintenance-control-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.maintenance-control-actions .btn {
+  min-height: 42px;
+  white-space: nowrap;
+}
+@media(max-width:700px) {
+  .maintenance-control-card {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 18px;
+  }
+  .maintenance-control-actions {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+  .maintenance-control-actions .btn {
+    width: 100%;
+  }
+}
