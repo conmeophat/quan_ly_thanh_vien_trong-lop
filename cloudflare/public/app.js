@@ -305,11 +305,14 @@ async function accounts(el,pending){
   const accountsHtml=accountRows.length?accountRows.map(x=>{
     const status=!x.is_active?"Đã xóa":x.registration_status==="pending"?"Chờ duyệt":x.registration_status==="rejected"?"Đã từ chối":"Đang hoạt động";
     const group=x.group_no?"Tổ "+x.group_no:"Không thuộc tổ";
-    const resetButton=me.role==="founder"&&x.role==="member"&&x.is_active&&x.registration_status==="approved"
-      ? '<button class="btn alt" data-reset-password="'+x.id+'" data-account-name="'+esc(x.full_name)+'">Cấp mật khẩu tạm</button>' : "";
+    const canManageStudentCredentials=["founder","teacher"].includes(me.role)&&["member","leader"].includes(x.role)&&x.is_active&&x.registration_status==="approved";
+    const resetButton=canManageStudentCredentials
+      ? '<button class="btn alt" data-reset-password="'+x.id+'" data-account-name="'+esc(x.full_name)+'">'+(me.role==="founder"?"Cấp mật khẩu tạm":"Đặt mật khẩu mới")+'</button>' : "";
+    const resetDeviceButton=canManageStudentCredentials
+      ? '<button class="btn alt" data-reset-device="'+x.id+'" data-account-name="'+esc(x.full_name)+'">Đặt lại thiết bị</button>' : "";
     const removeButton=me.role==="founder"&&x.role!=="founder"&&x.is_active
       ? '<button class="btn red" data-delete-account="'+x.id+'" data-account-name="'+esc(x.full_name)+'">Xóa tài khoản</button>' : "";
-    const actions=resetButton||removeButton?'<div class="actions">'+resetButton+removeButton+'</div>':"";
+    const actions=resetButton||resetDeviceButton||removeButton?'<div class="actions">'+resetButton+resetDeviceButton+removeButton+'</div>':"";
     return '<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · '+esc(x.role_label||roles[x.role]||x.role)+' · '+esc(group)+' · '+esc(status)+'</small></div>'+actions+'</div>';
   }).join(""):'<div class="empty">Chưa có tài khoản.</div>';
   const bulkProvisionCard=me.role==="founder"?'<section class="card bulk-provision-card"><p class="eyebrow">KHỞI TẠO TÀI KHOẢN</p><h2>Tạo tài khoản cho học sinh lớp 12A1</h2><p class="muted">Tự động tạo tài khoản còn thiếu cho danh sách 47 học sinh. File Excel có tên đăng nhập và mật khẩu hiện đang dùng. Mật khẩu được lưu trong kho mã hóa AES-GCM để Người sáng lập có thể tải lại file khi bị mất. Chỉ tài khoản chưa có bản sao mật khẩu hợp lệ mới được cấp mật khẩu mới một lần; các lần xuất sau không đổi mật khẩu.</p><button class="btn" id="bulk-create-roster" type="button">Tạo / đồng bộ 47 tài khoản và tải lại file đăng nhập <span aria-hidden="true">↓</span></button></section>':"";
@@ -319,7 +322,7 @@ async function accounts(el,pending){
     '<div class="credential-reset-warning"><strong>Những tài khoản đã có bản sao mã hóa hợp lệ sẽ không bị đổi mật khẩu</strong><p>Chỉ tài khoản chưa có bản sao, hoặc bản sao không còn khớp mật khẩu hiện tại, mới được cấp mật khẩu tạm mới và đăng xuất các phiên cũ. Người sáng lập và Giáo viên chủ nhiệm không bị ảnh hưởng.</p></div>'+
     '<p class="muted">Mật khẩu được mã hóa AES-GCM trong cơ sở dữ liệu, không lưu dạng văn bản thuần. File Excel chỉ tải xuống cho Người sáng lập; hãy lưu ở nơi an toàn và chỉ gửi mật khẩu cho đúng thành viên.</p>'+
     '<button class="btn" id="reset-all-student-passwords" type="button" '+(resettableAccounts.length?"":"disabled")+'>Xuất lại file thông tin đăng nhập <span aria-hidden="true">↓</span></button></section>':"";
-  el.innerHTML=bulkProvisionCard+bulkCredentialResetCard+'<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ. Mật khẩu gốc không thể xem lại; Người sáng lập có thể cấp mật khẩu tạm mới cho thành viên đã được duyệt.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
+  el.innerHTML=bulkProvisionCard+bulkCredentialResetCard+'<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Mỗi Thành viên/Tổ trưởng chỉ đăng nhập trên một trình duyệt/thiết bị đã liên kết. Thành viên tự đổi mật khẩu trong cài đặt tài khoản; Người sáng lập/GVCN có thể đặt mật khẩu mới hoặc đặt lại thiết bị khi cần hỗ trợ.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
   const resetAllButton=el.querySelector("#reset-all-student-passwords");
   if(resetAllButton)resetAllButton.onclick=async()=>{
     const count=resettableAccounts.length;
@@ -447,12 +450,29 @@ async function accounts(el,pending){
     try{await api("/api/accounts/"+b.dataset.reject+"/reject","POST",{});await dashboard()}catch(e){toast(e.message)}
   });
   el.querySelectorAll("[data-reset-password]").forEach(b=>b.onclick=async()=>{
-    if(!confirm('Cấp một mật khẩu tạm mới cho "'+b.dataset.accountName+'"? Mật khẩu hiện tại sẽ mất hiệu lực.'))return;
+    let payload={};
+    if(me.role==="founder"){
+      if(!confirm('Cấp mật khẩu tạm mới cho "'+b.dataset.accountName+'"? Mật khẩu hiện tại sẽ mất hiệu lực.'))return;
+    }else{
+      const newPassword=window.prompt('Nhập mật khẩu mới cho "'+b.dataset.accountName+'" (ít nhất 8 ký tự). Mật khẩu hiện tại sẽ mất hiệu lực:');
+      if(newPassword===null)return;
+      payload={new_password:newPassword};
+      if(!confirm('Xác nhận đặt mật khẩu mới cho "'+b.dataset.accountName+'"?'))return;
+    }
     try{
-      const result=await api("/api/accounts/"+b.dataset.resetPassword+"/reset-password","POST",{});
-      if(!result.temporary_password)throw Error("Máy chủ không trả về mật khẩu tạm.");
-      window.prompt("Mật khẩu tạm cho "+b.dataset.accountName+". Hãy sao chép và gửi riêng cho thành viên. Mật khẩu này chỉ hiển thị một lần:",result.temporary_password);
-      toast("Đã cấp mật khẩu tạm; mật khẩu cũ đã bị thu hồi.");
+      const result=await api("/api/accounts/"+b.dataset.resetPassword+"/reset-password","POST",payload);
+      const visiblePassword=result.temporary_password||payload.new_password;
+      if(!visiblePassword)throw Error("Máy chủ không trả về mật khẩu mới.");
+      window.prompt("Mật khẩu mới cho "+b.dataset.accountName+". Hãy sao chép và gửi riêng cho đúng thành viên:",visiblePassword);
+      toast("Đã cập nhật mật khẩu; file Excel dự phòng đã được đồng bộ.");
+      await accounts(el,pending);
+    }catch(e){toast(e.message)}
+  });
+  el.querySelectorAll("[data-reset-device]").forEach(b=>b.onclick=async()=>{
+    if(!confirm('Đặt lại thiết bị đã liên kết với "'+b.dataset.accountName+'"? Thiết bị hiện tại sẽ không còn được dùng để đăng nhập tài khoản này. Lần đăng nhập tiếp theo sẽ liên kết thiết bị mới.'))return;
+    try{
+      const result=await api("/api/accounts/"+b.dataset.resetDevice+"/reset-device","POST",{});
+      toast(result.message||"Đã đặt lại thiết bị.");
       await accounts(el,pending);
     }catch(e){toast(e.message)}
   });
