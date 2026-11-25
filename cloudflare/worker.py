@@ -1120,6 +1120,8 @@ class Default(WorkerEntrypoint):
                     return _response({"ok":True})
 
         if path=="/api/password/change" and method=="POST":
+            if actor["role"] not in ("founder","teacher"):
+                return _response({"error":"Vai trò này không được phép đổi mật khẩu."},403)
             body=await self._json_body(request)
             if not await _verify_password(str(body.get("old_password") or ""),actor["password_hash"]):
                 return _response({"error":"Mật khẩu hiện tại không đúng."},400)
