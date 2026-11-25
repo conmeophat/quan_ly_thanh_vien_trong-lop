@@ -29,8 +29,9 @@ jobs:
           import sqlite3
 
           connection = sqlite3.connect(":memory:")
-          connection.executescript(pathlib.Path("cloudflare/migrations/0001_initial.sql").read_text(encoding="utf-8"))
-          expected = {"users", "score_entries", "evaluations", "login_throttle", "audit_logs"}
+          for migration in sorted(pathlib.Path("cloudflare/migrations").glob("*.sql")):
+              connection.executescript(migration.read_text(encoding="utf-8"))
+          expected = {"users", "score_entries", "evaluations", "login_throttle", "audit_logs", "roster_assignments"}
           actual = {
               row[0]
               for row in connection.execute(
