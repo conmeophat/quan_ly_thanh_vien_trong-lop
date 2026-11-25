@@ -31,7 +31,7 @@ jobs:
           connection = sqlite3.connect(":memory:")
           for migration in sorted(pathlib.Path("cloudflare/migrations").glob("*.sql")):
               connection.executescript(migration.read_text(encoding="utf-8"))
-          expected = {"users", "score_entries", "evaluations", "login_throttle", "audit_logs", "roster_assignments", "daily_scores", "online_presence", "credential_vault"}
+          expected = {"users", "score_entries", "evaluations", "login_throttle", "audit_logs", "roster_assignments", "daily_scores", "online_presence", "credential_vault", "device_bindings"}
           actual = {
               row[0]
               for row in connection.execute(
@@ -39,7 +39,30 @@ jobs:
               )
           }
           assert expected <= actual, f"Missing D1 tables: {expected - actual}"
-          print("D1 schema OK:", ", ".join(sorted(expected)))
+
+          # Một tài khoản chỉ được gắn một thiết bị; một thiết bị chỉ được gắn một tài khoản.
+          student_ids = []
+          for index in (1, 2):
+              cursor = connection.execute(
+                  "INSERT INTO users(full_name,phone,password_hash,role,group_no) VALUES(?,?,?,?,?)",
+                  (f"Student {index}", f"09000000{index:02d}", "hash", "member", 1),
+              )
+              student_ids.append(cursor.lastrowid)
+          connection.execute(
+              "INSERT INTO device_bindings(user_id,device_hash) VALUES(?,?)",
+              (student_ids[0], "device-a"),
+          )
+          for user_id, device_hash in ((student_ids[1], "device-a"), (student_ids[0], "device-b")):
+              try:
+                  connection.execute(
+                      "INSERT INTO device_bindings(user_id,device_hash) VALUES(?,?)",
+                      (user_id, device_hash),
+                  )
+              except sqlite3.IntegrityError:
+                  pass
+              else:
+                  raise AssertionError("Device binding uniqueness constraint did not reject a duplicate")
+          print("D1 schema and one-account/one-device constraints OK:", ", ".join(sorted(expected)))
           PY
       - name: Validate shell deployment scripts
         run: find deploy/oracle -name '*.sh' -print0 | xargs -0 -n1 bash -n
