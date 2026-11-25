@@ -1,8 +1,9 @@
 """Cloudflare Python Worker backend for Class Merit Hub."""
 from __future__ import annotations
-import base64, hmac, io, json, re, secrets, time, traceback, zipfile, unicodedata
+import base64, hmac, io, json, math, re, secrets, time, traceback, zipfile, unicodedata
+from datetime import date, timedelta
 from xml.sax.saxutils import escape
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from js import Headers, Object, Response as JSResponse, Uint8Array, crypto, console
 from pyodide.ffi import to_js
 from workers import WorkerEntrypoint
@@ -112,6 +113,39 @@ async def _ensure_roster_assignments(database):
             "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
         await _run(database,"CREATE INDEX IF NOT EXISTS roster_assignments_group ON roster_assignments(group_no)")
+
+
+def _week_dates(value):
+    raw = str(value or "").strip()
+    try:
+        start = date.fromisoformat(raw)
+    except Exception as exc:
+        raise ValueError("Ngày bắt đầu tuần không hợp lệ.") from exc
+    if start.isoformat() != raw or start.weekday() != 0:
+        raise ValueError("Tuần phải bắt đầu vào Thứ Hai. Hãy chọn ngày Thứ Hai.")
+    return [ (start + timedelta(days=offset)).isoformat() for offset in range(7) ]
+
+def _weekday_label(value):
+    labels = ("Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ nhật")
+    return labels[date.fromisoformat(str(value)).weekday()]
+
+async def _ensure_weekly_scores(database):
+    try:
+        await _first(database, "SELECT id FROM daily_scores LIMIT 1")
+    except Exception:
+        await _run(database,
+            "CREATE TABLE IF NOT EXISTS daily_scores ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "member_id INTEGER NOT NULL REFERENCES users(id),"
+            "score_date TEXT NOT NULL,"
+            "points REAL NOT NULL CHECK(points BETWEEN -100 AND 100),"
+            "created_by INTEGER NOT NULL REFERENCES users(id),"
+            "updated_by INTEGER NOT NULL REFERENCES users(id),"
+            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "UNIQUE(member_id,score_date))"
+        )
+        await _run(database, "CREATE INDEX IF NOT EXISTS daily_scores_date_member ON daily_scores(score_date,member_id)")
 
 
 async def _pbkdf2(password, salt):
@@ -347,15 +381,19 @@ class Default(WorkerEntrypoint):
         raise ValueError("Bạn không có quyền xem dữ liệu thành viên này.")
 
     async def _member_records(self,member_id):
+        await _ensure_weekly_scores(self.env.DB)
         member=await _first(self.env.DB,"SELECT id,full_name,phone,role,group_no,is_active,registration_status,created_at FROM users WHERE id=?",member_id)
         if not member or member["role"]!="member":
             raise ValueError("Không tìm thấy thành viên.")
         scores=await _all(self.env.DB,"SELECT id,points,category,note,created_at FROM score_entries WHERE member_id=? AND is_deleted=0 ORDER BY created_at DESC,id DESC LIMIT 100",member_id)
         evaluations=await _all(self.env.DB,"SELECT id,content,created_at FROM evaluations WHERE member_id=? AND is_deleted=0 ORDER BY created_at DESC,id DESC LIMIT 100",member_id)
-        return {"member":{"id":member["id"],"full_name":member["full_name"],"phone":member["phone"],"group_no":member["group_no"]},"total_points":sum(float(x["points"]) for x in scores),"scores":scores,"evaluations":evaluations}
+        daily_total=await _first(self.env.DB,"SELECT COALESCE(SUM(points),0) AS total_points FROM daily_scores WHERE member_id=?",member_id)
+        total_points=sum(float(x["points"]) for x in scores)+float(daily_total["total_points"] or 0)
+        return {"member":{"id":member["id"],"full_name":member["full_name"],"phone":member["phone"],"group_no":member["group_no"]},"total_points":total_points,"scores":scores,"evaluations":evaluations}
 
     async def _dashboard(self,actor):
         database=self.env.DB
+        await _ensure_weekly_scores(database)
         if actor["role"]=="member":
             return {"user":_public_user(actor),"personal":await self._member_records(int(actor["id"]))}
 
@@ -367,7 +405,8 @@ class Default(WorkerEntrypoint):
 
         rows=await _all(database,
             "SELECT u.id,u.full_name,u.phone,u.role,u.group_no,u.is_active,u.registration_status,u.created_at,"
-            "COALESCE((SELECT SUM(s.points) FROM score_entries s WHERE s.member_id=u.id AND s.is_deleted=0),0) AS total_points "
+            "COALESCE((SELECT SUM(s.points) FROM score_entries s WHERE s.member_id=u.id AND s.is_deleted=0),0)+"
+            "COALESCE((SELECT SUM(ds.points) FROM daily_scores ds WHERE ds.member_id=u.id),0) AS total_points "
             "FROM users u WHERE u.role IN ('member','leader') ORDER BY u.created_at DESC,u.id DESC"
         )
         matched={}
@@ -447,18 +486,125 @@ class Default(WorkerEntrypoint):
             pending=await _all(database,"SELECT id,full_name,phone,group_no,created_at FROM users WHERE role='member' AND is_active=1 AND registration_status='pending' ORDER BY created_at ASC")
         return {"user":_public_user(actor),"groups":group_data,"pending_members":pending}
 
+    async def _weekly_scores(self, actor, request, method):
+        database=self.env.DB
+        await _ensure_weekly_scores(database)
+        if method=="GET":
+            query=parse_qs(urlparse(request.url).query)
+            week_start=query.get("week_start",[""])[0]
+            dates=_week_dates(week_start)
+            where=""
+            params=[dates[0],dates[-1]]
+            if actor["role"]=="leader":
+                where=" AND u.group_no=?"
+                params.append(int(actor["group_no"]))
+            elif actor["role"]=="member":
+                where=" AND u.id=?"
+                params.append(int(actor["id"]))
+            rows=await _all(database,
+                "SELECT u.id,u.full_name,u.group_no,ds.score_date,ds.points "
+                "FROM users u LEFT JOIN daily_scores ds ON ds.member_id=u.id AND ds.score_date BETWEEN ? AND ? "
+                "WHERE u.role='member' AND u.is_active=1 AND u.registration_status='approved'"+where+
+                " ORDER BY u.group_no,u.full_name COLLATE NOCASE,ds.score_date",
+                *params
+            )
+            grouped={}
+            for row in rows:
+                group_no=int(row["group_no"])
+                group=grouped.setdefault(group_no,{"group_no":group_no,"members":{}})
+                member=group["members"].get(int(row["id"]))
+                if member is None:
+                    member={"id":int(row["id"]),"full_name":row["full_name"],
+                        "days":{day:None for day in dates},"week_total":0.0,"filled_days":0}
+                    group["members"][int(row["id"])]=member
+                if row["score_date"]:
+                    value=float(row["points"])
+                    member["days"][str(row["score_date"])]=value
+                    member["week_total"]+=value
+                    member["filled_days"]+=1
+            groups=[]
+            for group_no in sorted(grouped):
+                group=grouped[group_no]
+                members=sorted(group["members"].values(),key=lambda item:item["full_name"].casefold())
+                group["members"]=members
+                group["week_total"]=sum(member["week_total"] for member in members)
+                group["filled_days"]=sum(member["filled_days"] for member in members)
+                groups.append(group)
+            return _response({
+                "week_start":dates[0],"week_end":dates[-1],"dates":dates,
+                "weekday_labels":[_weekday_label(day) for day in dates],"groups":groups
+            })
+
+        if method=="POST":
+            if actor["role"] not in ("founder","teacher","leader"):
+                return _response({"error":"Chỉ Người sáng lập, Giáo viên chủ nhiệm và Tổ trưởng được cập nhật điểm theo ngày."},403)
+            body=await self._json_body(request)
+            dates=_week_dates(body.get("week_start"))
+            scores=body.get("scores")
+            if not isinstance(scores,list) or len(scores)>400:
+                raise ValueError("Danh sách điểm tuần không hợp lệ hoặc vượt quá 400 ô.")
+            seen=set()
+            saved=0
+            removed=0
+            for entry in scores:
+                if not isinstance(entry,dict):
+                    raise ValueError("Một ô điểm trong dữ liệu gửi lên không hợp lệ.")
+                member_id=int(entry.get("member_id") or 0)
+                score_date=str(entry.get("date") or "")
+                if score_date not in dates:
+                    raise ValueError("Ngày ghi điểm phải thuộc tuần đã chọn từ Thứ Hai đến Chủ nhật.")
+                key=(member_id,score_date)
+                if member_id<=0 or key in seen:
+                    raise ValueError("Danh sách thành viên/ngày bị trùng hoặc không hợp lệ.")
+                seen.add(key)
+                await self._member_allowed(actor,member_id)
+                raw_points=entry.get("points")
+                if raw_points is None or raw_points=="":
+                    await _run(database,"DELETE FROM daily_scores WHERE member_id=? AND score_date=?",member_id,score_date)
+                    removed+=1
+                    continue
+                if isinstance(raw_points,bool):
+                    raise ValueError("Điểm mỗi ngày phải là số từ -100 đến +100.")
+                try:
+                    points=float(raw_points)
+                except Exception as exc:
+                    raise ValueError("Điểm mỗi ngày phải là số từ -100 đến +100.") from exc
+                if not math.isfinite(points) or points < -100 or points > 100:
+                    raise ValueError("Điểm mỗi ngày phải nằm trong khoảng -100 đến +100.")
+                await _run(database,
+                    "INSERT INTO daily_scores(member_id,score_date,points,created_by,updated_by) VALUES(?,?,?,?,?) "
+                    "ON CONFLICT(member_id,score_date) DO UPDATE SET points=excluded.points,"
+                    "updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP",
+                    member_id,score_date,points,int(actor["id"]),int(actor["id"])
+                )
+                saved+=1
+            if saved or removed:
+                await _audit(database,int(actor["id"]),"update_weekly_scores",None,
+                    "Tuần "+dates[0]+" đến "+dates[-1]+" | lưu "+str(saved)+" ô | xóa "+str(removed)+" ô.")
+            return _response({"ok":True,"saved":saved,"removed":removed,
+                "message":"Đã lưu điểm tuần "+dates[0]+" đến "+dates[-1]+"."})
+
+        return _response({"error":"Phương thức không được hỗ trợ."},405)
+
     async def _export_merit_excel(self, actor):
         database = self.env.DB
+        await _ensure_weekly_scores(database)
         members = await _all(database,
             "SELECT u.id,u.group_no,u.full_name,u.phone,u.is_active,u.created_at,"
-            "COALESCE(s.total_points,0) AS total_points,COALESCE(s.score_count,0) AS score_count,"
-            "COALESCE(s.positive_points,0) AS positive_points,COALESCE(s.negative_points,0) AS negative_points,"
+            "COALESCE(s.total_points,0)+COALESCE(d.total_points,0) AS total_points,"
+            "COALESCE(s.score_count,0)+COALESCE(d.score_count,0) AS score_count,"
+            "COALESCE(s.positive_points,0)+COALESCE(d.positive_points,0) AS positive_points,"
+            "COALESCE(s.negative_points,0)+COALESCE(d.negative_points,0) AS negative_points,"
             "COALESCE(e.evaluation_count,0) AS evaluation_count "
             "FROM users u "
             "LEFT JOIN (SELECT member_id,SUM(points) AS total_points,COUNT(*) AS score_count,"
             "SUM(CASE WHEN points>0 THEN points ELSE 0 END) AS positive_points,"
             "SUM(CASE WHEN points<0 THEN points ELSE 0 END) AS negative_points "
             "FROM score_entries WHERE is_deleted=0 GROUP BY member_id) s ON s.member_id=u.id "
+            "LEFT JOIN (SELECT member_id,SUM(points) AS total_points,COUNT(*) AS score_count,"
+            "SUM(CASE WHEN points>0 THEN points ELSE 0 END) AS positive_points,"
+            "SUM(CASE WHEN points<0 THEN points ELSE 0 END) AS negative_points "
+            "FROM daily_scores GROUP BY member_id) d ON d.member_id=u.id "
             "LEFT JOIN (SELECT member_id,COUNT(*) AS evaluation_count FROM evaluations WHERE is_deleted=0 GROUP BY member_id) e ON e.member_id=u.id "
             "WHERE u.role='member' AND u.is_active=1 AND u.registration_status='approved' "
             "ORDER BY u.group_no,u.full_name COLLATE NOCASE"
@@ -478,6 +624,14 @@ class Default(WorkerEntrypoint):
             "LEFT JOIN users c ON c.id=e.evaluator_id "
             "WHERE e.is_deleted=0 AND u.role='member' AND u.is_active=1 AND u.registration_status='approved' "
             "ORDER BY u.group_no,u.full_name COLLATE NOCASE,e.created_at,e.id"
+        )
+        daily_score_rows = await _all(database,
+            "SELECT u.group_no,u.full_name,u.phone,ds.score_date,ds.points,"
+            "COALESCE(c.full_name,'Không rõ') AS updater_name,ds.updated_at "
+            "FROM daily_scores ds JOIN users u ON u.id=ds.member_id "
+            "LEFT JOIN users c ON c.id=ds.updated_by "
+            "WHERE u.role='member' AND u.is_active=1 AND u.registration_status='approved' "
+            "ORDER BY ds.score_date,u.group_no,u.full_name COLLATE NOCASE"
         )
         summary_data = []
         for member in members:
@@ -501,14 +655,21 @@ class Default(WorkerEntrypoint):
             "Tổ " + str(row["group_no"]),row["full_name"],row["phone"],
             row["content"],row["evaluator_name"],row["created_at"]
         ] for row in evaluation_rows]
+        daily_score_data = [[
+            "Tổ " + str(row["group_no"]),row["full_name"],row["phone"],
+            row["score_date"],_weekday_label(row["score_date"]),float(row["points"]),
+            row["updater_name"],row["updated_at"]
+        ] for row in daily_score_rows]
         sheets = [
             ("Tổng hợp",["Tổ","Họ và tên","Tên đăng nhập / SĐT","Trạng thái","Tổng điểm","Số lần ghi điểm","Điểm cộng","Điểm trừ","Số nhận xét","Ngày tạo tài khoản"],summary_data,[9,26,17,17,13,16,14,14,14,21]),
             ("Lịch sử điểm",["Tổ","Họ và tên","Tên đăng nhập / SĐT","Điểm (+/-)","Loại điểm","Lý do / minh chứng","Người ghi điểm","Thời gian"],score_data,[9,25,17,13,18,50,24,21]),
             ("Nhận xét",["Tổ","Họ và tên","Tên đăng nhập / SĐT","Nội dung nhận xét","Người nhận xét","Thời gian"],evaluation_data,[9,25,17,55,24,21]),
+            ("Điểm theo ngày",["Tổ","Họ và tên","Tên đăng nhập / SĐT","Ngày","Thứ","Điểm ngày","Người cập nhật","Cập nhật lúc"],daily_score_data,[9,25,17,16,14,13,24,21]),
         ]
         workbook = _build_xlsx(sheets)
         await _audit(database,int(actor["id"]),"export_merit_excel",None,
-            "Xuất Excel: " + str(len(members)) + " thành viên, " + str(len(score_rows)) + " lượt ghi điểm, " + str(len(evaluation_rows)) + " nhận xét."
+            "Xuất Excel: " + str(len(members)) + " thành viên, " + str(len(score_rows)) + " lượt ghi điểm, "
+            + str(len(daily_score_rows)) + " lượt điểm theo ngày, " + str(len(evaluation_rows)) + " nhận xét."
         )
         headers = Headers.new()
         headers.set("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -599,6 +760,8 @@ class Default(WorkerEntrypoint):
             return _response({"user":_public_user(actor)})
         if path=="/api/dashboard" and method=="GET":
             return _response(await self._dashboard(actor))
+        if path=="/api/weekly-scores":
+            return await self._weekly_scores(actor,request,method)
 
         if path=="/api/class/assign-leader" and method=="POST":
             if actor["role"] not in ("founder","teacher"):
