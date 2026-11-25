@@ -588,6 +588,7 @@ class Default(WorkerEntrypoint):
                     existing_by_name[key]=row
 
             entries=[]
+            pending_creations=[]
             created_count=0
             existing_count=0
             for index,official_name in enumerate(CLASS_ROSTER[group_no],start=1):
@@ -621,18 +622,39 @@ class Default(WorkerEntrypoint):
                         username="12a1-t"+str(group_no)+"-"+str(index).zfill(2)+"-"+secrets.token_hex(3)
                 password=secrets.token_urlsafe(12)
                 password_hash=await _hash_password(password)
-                await _run(database,
-                    "INSERT INTO users(full_name,phone,password_hash,role,group_no,is_active,registration_status) VALUES(?,?,?,'member',?,1,'approved')",
-                    official_name,username,password_hash,group_no
-                )
-                created=await _first(database,"SELECT id FROM users WHERE phone=?",username)
-                await _audit(database,int(actor["id"]),"bulk_create_student_account",int(created["id"]),
-                    "Tổ "+str(group_no)+" | "+official_name+" | "+username)
-                entries.append({
+                pending_creations.append({
                     "group_no":group_no,"stt":index,"full_name":official_name,
-                    "username":username,"password":password,"status":"Tài khoản mới — đã kích hoạt"
+                    "username":username,"password":password,"password_hash":password_hash
                 })
-                created_count+=1
+
+            # Finish password hashing for the whole group before writing any new account.
+            # If a hash operation fails, no credentials from this group become orphaned in D1.
+            created_ids=[]
+            try:
+                for item in pending_creations:
+                    await _run(database,
+                        "INSERT INTO users(full_name,phone,password_hash,role,group_no,is_active,registration_status) VALUES(?,?,?,'member',?,1,'approved')",
+                        item["full_name"],item["username"],item["password_hash"],group_no
+                    )
+                    created=await _first(database,"SELECT id FROM users WHERE phone=?",item["username"])
+                    created_id=int(created["id"])
+                    created_ids.append(created_id)
+                    await _audit(database,int(actor["id"]),"bulk_create_student_account",created_id,
+                        "Tổ "+str(group_no)+" | "+item["full_name"]+" | "+item["username"])
+                    entries.append({
+                        "group_no":group_no,"stt":item["stt"],"full_name":item["full_name"],
+                        "username":item["username"],"password":item["password"],"status":"Tài khoản mới — đã kích hoạt"
+                    })
+                    created_count+=1
+            except Exception:
+                for created_id in created_ids:
+                    try:
+                        await _run(database,"DELETE FROM audit_logs WHERE actor_id=? AND action='bulk_create_student_account' AND target_user_id=?",
+                            int(actor["id"]),created_id)
+                        await _run(database,"DELETE FROM users WHERE id=?",created_id)
+                    except Exception:
+                        pass
+                raise
 
             return _response({
                 "ok":True,"group_no":group_no,"created_count":created_count,
