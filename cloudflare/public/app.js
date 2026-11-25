@@ -1,4 +1,4 @@
-const app=document.querySelector("#app"),userbar=document.querySelector("#userbar"),topnav=document.querySelector("#topnav");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null,maintenanceWatchTimer=null,maintenanceReloadTimer=null;
+const app=document.querySelector("#app"),userbar=document.querySelector("#userbar"),topnav=document.querySelector("#topnav");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null,maintenanceWatchTimer=null,maintenanceReloadTimer=null,leaderNotificationWatchTimer=null;
 
 // Ngăn menu chuột phải và các phím tắt mở DevTools thông dụng với Thành viên/Tổ trưởng.
 // Đây chỉ là biện pháp hạn chế ở giao diện; quyền sửa điểm luôn được xác thực tại Worker.
@@ -50,7 +50,67 @@ function showMaintenanceScreen(message="Trang web đang được bảo trì, nâ
   checkReopened();
   maintenanceReloadTimer=setInterval(checkReopened,10000);
 }
-async function api(path,method="GET",data){let r=await fetch(path,{method,credentials:"same-origin",headers:{"Content-Type":"application/json"},...(data===undefined?{}:{body:JSON.stringify(data)})});let j={};try{j=await r.json()}catch{}if(!r.ok){if(r.status===503&&j.code==="SITE_MAINTENANCE"){showMaintenanceScreen(j.error);const error=new Error(j.error||"Trang web đang được bảo trì.");error.code="SITE_MAINTENANCE";throw error}throw Error(j.error||"Yêu cầu không thành công")}return j}
+function showLeaderNotificationGate(permission){
+  stopRegistrationWatch();
+  stopPresenceWatch();
+  if(me)bar();
+  if(topnav)topnav.innerHTML="";
+  document.title="Bật thông báo để tiếp tục";
+  const supported=("Notification" in window)&&window.isSecureContext;
+  const denied=permission==="denied";
+  const unsupported=!supported||permission==="unsupported";
+  const help=unsupported
+    ?"Trình duyệt hoặc chế độ hiện tại không hỗ trợ thông báo. Hãy mở website bằng trình duyệt có hỗ trợ thông báo và kết nối HTTPS. Trên một số điện thoại, bạn có thể cần thêm website ra màn hình chính trước khi bật thông báo."
+    :denied
+      ?"Bạn đã chặn thông báo trước đó. Hãy mở Cài đặt trang web trong trình duyệt, chọn Quyền / Notifications (Thông báo), đổi thành Cho phép / Allow, rồi tải lại trang."
+      :"Nhấn nút bên dưới và chọn Cho phép / Allow trong cửa sổ yêu cầu của trình duyệt.";
+  app.innerHTML='<style>.leader-notification-gate{min-height:68vh;display:grid;place-items:center;padding:24px 12px}.leader-notification-card{width:min(100%,650px);padding:clamp(25px,5vw,48px);border:1px solid rgba(130,160,195,.2);border-radius:22px;background:linear-gradient(145deg,#132239,#1b304b);color:#edf4ff;box-shadow:0 24px 70px rgba(12,25,43,.22);text-align:center}.leader-notification-card .eyebrow{color:#9cc7ef}.leader-notification-card h1{margin:8px 0 14px;font-size:clamp(25px,5vw,36px)}.leader-notification-card p{color:#c5d2e2;line-height:1.75}.leader-notification-help{margin:20px 0;padding:13px 15px;border:1px solid rgba(112,175,232,.24);border-radius:12px;background:rgba(68,132,190,.1);color:#d4e2f2;text-align:left;font-size:13px;line-height:1.65}.leader-notification-card .btn{width:100%;min-height:44px}.leader-notification-card .hint{min-height:24px;color:#ffd18a;font-size:13px}</style><section class="leader-notification-gate"><div class="leader-notification-card"><div class="maintenance-screen-mark">ĐT</div><p class="eyebrow">YÊU CẦU DÀNH RIÊNG CHO TỔ TRƯỞNG</p><h1>Bật thông báo để tiếp tục</h1><p>Để sử dụng trang web, tài khoản Tổ trưởng cần cho phép trình duyệt gửi thông báo. Khi quyền thông báo được bật, hệ thống mới mở bảng điều khiển Tổ trưởng.</p><div class="leader-notification-help">'+esc(help)+'</div><button class="btn" id="leader-enable-notifications" type="button">'+(denied?"Tôi đã đổi cài đặt — kiểm tra lại":"Bật thông báo và tiếp tục")+'</button><p class="hint" id="leader-notification-message" role="status"></p></div></section>';
+  const button=document.querySelector("#leader-enable-notifications");
+  const message=document.querySelector("#leader-notification-message");
+  if(!button)return;
+  button.disabled=unsupported;
+  if(unsupported)message.textContent="Trình duyệt hiện tại chưa đáp ứng yêu cầu thông báo.";
+  button.onclick=async()=>{
+    if(!("Notification" in window)||!window.isSecureContext){
+      message.textContent="Hãy đổi sang trình duyệt hỗ trợ thông báo và HTTPS.";
+      return;
+    }
+    button.disabled=true;
+    try{
+      let state=Notification.permission;
+      if(state==="default")state=await Notification.requestPermission();
+      if(state!=="granted"){
+        showLeaderNotificationGate(state);
+        const nextMessage=document.querySelector("#leader-notification-message");
+        if(nextMessage)nextMessage.textContent=state==="denied"?"Bạn cần đổi quyền thông báo sang Cho phép trong cài đặt trình duyệt.":"Bạn chưa cho phép thông báo. Hãy chọn Cho phép để tiếp tục.";
+        return;
+      }
+      await api("/api/leader/notification-permission","POST",{permission:"granted"});
+      toast("Đã bật quyền thông báo cho tài khoản Tổ trưởng.");
+      await start();
+    }catch(error){
+      message.textContent=error.message||"Không thể lưu quyền thông báo.";
+      button.disabled=false;
+    }
+  };
+}
+async function ensureLeaderNotificationPermission(){
+  if(!me||me.role!=="leader")return true;
+  if(!("Notification" in window)||!window.isSecureContext){
+    showLeaderNotificationGate("unsupported");
+    return false;
+  }
+  const permission=Notification.permission;
+  if(permission==="granted"){
+    const stored=await api("/api/leader/notification-permission");
+    if(!stored.enabled)await api("/api/leader/notification-permission","POST",{permission:"granted"});
+    return true;
+  }
+  await api("/api/leader/notification-permission","POST",{permission});
+  showLeaderNotificationGate(permission);
+  return false;
+}
+async function api(path,method="GET",data){let r=await fetch(path,{method,credentials:"same-origin",headers:{"Content-Type":"application/json"},...(data===undefined?{}:{body:JSON.stringify(data)})});let j={};try{j=await r.json()}catch{}if(!r.ok){if(r.status===503&&j.code==="SITE_MAINTENANCE"){showMaintenanceScreen(j.error);const error=new Error(j.error||"Trang web đang được bảo trì.");error.code="SITE_MAINTENANCE";throw error}if(r.status===428&&j.code==="LEADER_NOTIFICATION_REQUIRED"){if(me&&me.role==="leader")showLeaderNotificationGate(("Notification" in window)?Notification.permission:"unsupported");const error=new Error(j.error||"Tổ trưởng cần bật thông báo để tiếp tục.");error.code="LEADER_NOTIFICATION_REQUIRED";throw error}throw Error(j.error||"Yêu cầu không thành công")}return j}
 function field(label,name,type="text",placeholder=""){return '<label class="field">'+esc(label)+'<input name="'+name+'" type="'+type+'" placeholder="'+esc(placeholder)+'" required></label>'}
 function groupsel(){return '<label class="field">Tổ<select name="group_no" required><option value="1">Tổ 1</option><option value="2">Tổ 2</option><option value="3">Tổ 3</option><option value="4">Tổ 4</option></select></label>'}
 function authForm(title,desc,fields,button,submit,link){
@@ -60,7 +120,7 @@ function authForm(title,desc,fields,button,submit,link){
 function login(){authForm("Đăng nhập","Sử dụng tên đăng nhập được cấp hoặc số điện thoại đã đăng ký.",field("Tên đăng nhập hoặc số điện thoại","phone","text","Nhập tên đăng nhập hoặc số điện thoại")+field("Mật khẩu","password","password"),"Đăng nhập",async d=>{await api("/api/device/init","POST",{});await api("/api/login","POST",d);await start()},'<button class="btn link" id="reg">Chưa có tài khoản? Đăng ký</button>');document.querySelector("#reg").onclick=register}
 function register(){authForm("Đăng ký thành viên","Tài khoản mới luôn phải được người quản trị duyệt. Nếu họ tên có trong danh sách lớp, hệ thống sẽ tự xếp đúng tổ theo danh sách.",field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+groupsel()+field("Mật khẩu (8–128 ký tự)","password","password"),"Gửi đăng ký",async d=>{await api("/api/register","POST",d);toast("Đã gửi đăng ký. Vui lòng chờ duyệt.");login()},'<button class="btn link" id="back">Quay lại đăng nhập</button>');document.querySelector("#back").onclick=login}
 function bootstrap(){authForm("Thiết lập người sáng lập","Nhập mã FOUNDER_SETUP_TOKEN đã đặt trong Cloudflare Secrets.",field("Mã thiết lập","setup_token","password")+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password"),"Tạo tài khoản",async d=>{await api("/api/bootstrap","POST",d);toast("Đã tạo tài khoản người sáng lập.");await start()})}
-async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;bar();await dashboard();return}catch(e){if(e.code==="SITE_MAINTENANCE")return}userbar.innerHTML="";if(topnav)topnav.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){if(e.code==="SITE_MAINTENANCE")return;app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
+async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;if(me.role==="leader"&&!(await ensureLeaderNotificationPermission()))return;bar();await dashboard();return}catch(e){if(e.code==="SITE_MAINTENANCE"||e.code==="LEADER_NOTIFICATION_REQUIRED")return}userbar.innerHTML="";if(topnav)topnav.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){if(e.code==="SITE_MAINTENANCE"||e.code==="LEADER_NOTIFICATION_REQUIRED")return;app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
 function bar(){
   const initials=String(me.full_name||"").trim().split(/\s+/).slice(-2).map(x=>x[0]||"").join("").toUpperCase();
   userbar.innerHTML='<div class="user-menu"><div class="user-avatar" aria-hidden="true">'+esc(initials||"TV")+'</div><div class="user-identity"><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div><button class="btn logout-btn" id="logout" type="button"><span aria-hidden="true">↪</span> Đăng xuất</button></div>';
@@ -79,6 +139,7 @@ async function dashboard(){
   bar();
   startPresenceWatch();
   startMaintenanceWatch();
+  startLeaderNotificationWatch();
   try{
     let d=await api("/api/dashboard");
     if(d.personal){
@@ -172,6 +233,29 @@ function startMaintenanceWatch(){
   check();
   maintenanceWatchTimer=setInterval(check,10000);
 }
+function startLeaderNotificationWatch(){
+  if(!me||me.role!=="leader"||leaderNotificationWatchTimer!==null)return;
+  const check=async()=>{
+    if(!me||me.role!=="leader"||document.visibilityState==="hidden")return;
+    if(!("Notification" in window)||!window.isSecureContext){
+      showLeaderNotificationGate("unsupported");
+      return;
+    }
+    const permission=Notification.permission;
+    if(permission!=="granted"){
+      try{await api("/api/leader/notification-permission","POST",{permission})}catch{}
+      showLeaderNotificationGate(permission);
+      return;
+    }
+    try{
+      const stored=await api("/api/leader/notification-permission");
+      if(!stored.enabled)await api("/api/leader/notification-permission","POST",{permission:"granted"});
+    }catch(error){
+      if(error.code==="LEADER_NOTIFICATION_REQUIRED")showLeaderNotificationGate(permission);
+    }
+  };
+  leaderNotificationWatchTimer=setInterval(check,10000);
+}
 function startPresenceWatch(){
   if(!me||presenceWatchTimer!==null)return;
   const ping=async()=>{
@@ -185,6 +269,7 @@ function stopPresenceWatch(){
   if(presenceWatchTimer!==null){clearInterval(presenceWatchTimer);presenceWatchTimer=null}
   if(presencePanelTimer!==null){clearInterval(presencePanelTimer);presencePanelTimer=null}
   if(maintenanceWatchTimer!==null){clearInterval(maintenanceWatchTimer);maintenanceWatchTimer=null}
+  if(leaderNotificationWatchTimer!==null){clearInterval(leaderNotificationWatchTimer);leaderNotificationWatchTimer=null}
 }
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"&&me)api("/api/presence/ping","POST",{}).catch(()=>{});
