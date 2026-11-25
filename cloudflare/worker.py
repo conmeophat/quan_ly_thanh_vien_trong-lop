@@ -397,6 +397,9 @@ class Default(WorkerEntrypoint):
             members=[]
             for official_name in roster_names:
                 row=matched.get(_name_key(official_name))
+                # A soft-deleted account must disappear from the class roster UI.
+                if row and not row["is_active"]:
+                    continue
                 if row and row["role"]=="leader":
                     continue
                 if row and row["is_active"] and row["registration_status"]=="approved":
@@ -413,11 +416,6 @@ class Default(WorkerEntrypoint):
                     members.append({
                         "id":None,"full_name":official_name,"phone":"",
                         "total_points":0,"status_label":"Đăng ký đã bị từ chối"
-                    })
-                elif row and not row["is_active"]:
-                    members.append({
-                        "id":None,"full_name":official_name,"phone":"",
-                        "total_points":0,"status_label":"Tài khoản đã bị khóa"
                     })
                 else:
                     members.append({
@@ -446,7 +444,7 @@ class Default(WorkerEntrypoint):
             })
         pending=[]
         if actor["role"] in ("founder","teacher"):
-            pending=await _all(database,"SELECT id,full_name,phone,group_no,created_at FROM users WHERE role='member' AND registration_status='pending' ORDER BY created_at ASC")
+            pending=await _all(database,"SELECT id,full_name,phone,group_no,created_at FROM users WHERE role='member' AND is_active=1 AND registration_status='pending' ORDER BY created_at ASC")
         return {"user":_public_user(actor),"groups":group_data,"pending_members":pending}
 
     async def _export_merit_excel(self, actor):
@@ -462,7 +460,7 @@ class Default(WorkerEntrypoint):
             "SUM(CASE WHEN points<0 THEN points ELSE 0 END) AS negative_points "
             "FROM score_entries WHERE is_deleted=0 GROUP BY member_id) s ON s.member_id=u.id "
             "LEFT JOIN (SELECT member_id,COUNT(*) AS evaluation_count FROM evaluations WHERE is_deleted=0 GROUP BY member_id) e ON e.member_id=u.id "
-            "WHERE u.role='member' AND u.registration_status='approved' "
+            "WHERE u.role='member' AND u.is_active=1 AND u.registration_status='approved' "
             "ORDER BY u.group_no,u.full_name COLLATE NOCASE"
         )
         score_rows = await _all(database,
@@ -470,7 +468,7 @@ class Default(WorkerEntrypoint):
             "COALESCE(c.full_name,'Không rõ') AS creator_name,s.created_at "
             "FROM score_entries s JOIN users u ON u.id=s.member_id "
             "LEFT JOIN users c ON c.id=s.created_by "
-            "WHERE s.is_deleted=0 AND u.role='member' AND u.registration_status='approved' "
+            "WHERE s.is_deleted=0 AND u.role='member' AND u.is_active=1 AND u.registration_status='approved' "
             "ORDER BY u.group_no,u.full_name COLLATE NOCASE,s.created_at,s.id"
         )
         evaluation_rows = await _all(database,
@@ -478,7 +476,7 @@ class Default(WorkerEntrypoint):
             "COALESCE(c.full_name,'Không rõ') AS evaluator_name,e.created_at "
             "FROM evaluations e JOIN users u ON u.id=e.member_id "
             "LEFT JOIN users c ON c.id=e.evaluator_id "
-            "WHERE e.is_deleted=0 AND u.role='member' AND u.registration_status='approved' "
+            "WHERE e.is_deleted=0 AND u.role='member' AND u.is_active=1 AND u.registration_status='approved' "
             "ORDER BY u.group_no,u.full_name COLLATE NOCASE,e.created_at,e.id"
         )
         summary_data = []
@@ -841,9 +839,9 @@ class Default(WorkerEntrypoint):
             if actor["role"]=="member":
                 return _response({"accounts":[_public_user(actor)]})
             if actor["role"]=="leader":
-                rows=await _all(database,"SELECT * FROM users WHERE role='member' AND group_no=? ORDER BY full_name",int(actor["group_no"]))
+                rows=await _all(database,"SELECT * FROM users WHERE role='member' AND is_active=1 AND group_no=? ORDER BY full_name",int(actor["group_no"]))
             else:
-                rows=await _all(database,"SELECT * FROM users ORDER BY role,group_no,full_name")
+                rows=await _all(database,"SELECT * FROM users WHERE is_active=1 ORDER BY role,group_no,full_name")
             return _response({"accounts":[_public_user(row) for row in rows]})
 
         if path=="/api/accounts" and method=="POST":
