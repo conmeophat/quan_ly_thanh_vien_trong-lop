@@ -1171,21 +1171,21 @@ class Default(WorkerEntrypoint):
 
         if path=="/api/accounts/reset-all-student-passwords" and method=="POST":
             if actor["role"] != "founder":
-                return _response({"error":"Chỉ Người sáng lập được cấp lại mật khẩu toàn lớp."},403)
+                return _response({"error":"Chỉ Người sáng lập được xuất thông tin đăng nhập toàn lớp."},403)
             body=await self._json_body(request)
-            if body.get("confirmation") != "CAP_LAI_MAT_KHAU_TOAN_LOP":
+            if body.get("confirmation") != "XUAT_FILE_TAI_KHOAN_12A1":
                 return _response({"error":"Xác nhận cấp lại mật khẩu không hợp lệ."},400)
             await _ensure_credential_vault(database)
             vault_secret=_credential_vault_secret(self.env)
 
-            # Chỉ đổi mật khẩu cho học sinh (Thành viên/Tổ trưởng) đang hoạt động và đã được duyệt.
+            # Chỉ xuất thông tin đăng nhập của học sinh (Thành viên/Tổ trưởng) đang hoạt động và đã được duyệt.
             rows=await _all(database,
                 "SELECT id,full_name,phone,password_hash,role,group_no FROM users "
                 "WHERE role IN ('member','leader') AND is_active=1 AND registration_status='approved' "
                 "ORDER BY group_no,CASE role WHEN 'leader' THEN 0 ELSE 1 END,full_name COLLATE NOCASE"
             )
             if not rows:
-                raise ValueError("Không có tài khoản học sinh đang hoạt động để cấp lại mật khẩu.")
+                raise ValueError("Không có tài khoản học sinh đang hoạt động để xuất thông tin đăng nhập.")
 
             credential_rows=[]
             password_reset_count=0
