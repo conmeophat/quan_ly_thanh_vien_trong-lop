@@ -1118,3 +1118,75 @@ button:focus-visible{outline:3px solid rgba(65,125,205,.28);outline-offset:2px}
   .weekly-overview strong{font-size:12px}
   .weekly-controls .btn{padding:8px;font-size:10px}
 }
+
+
+/* Online presence dashboard */
+.presence-intro{
+  display:flex;align-items:center;justify-content:space-between;gap:15px;
+  margin:0 0 15px;padding:18px 20px;
+  background:rgba(255,255,255,.92);border:1px solid #e2eaf5;
+  border-radius:17px;box-shadow:0 8px 22px rgba(25,48,85,.045);
+}
+.presence-intro .eyebrow{margin:0 0 6px}
+.presence-intro h3{margin:0 0 6px;font-size:17px}
+.presence-intro p:not(.eyebrow){margin:0;color:#718096;font-size:12px;line-height:1.55}
+.presence-intro .btn{flex:0 0 auto;min-height:39px}
+.presence-summary{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;
+  margin-bottom:15px;
+}
+.presence-stat{
+  display:grid;gap:5px;padding:14px 16px;
+  background:rgba(255,255,255,.94);border:1px solid #e3eaf4;border-radius:14px;
+}
+.presence-stat small{color:#8291a5;font-size:10px;font-weight:750}
+.presence-stat strong{color:#294766;font-size:23px;font-weight:900;font-variant-numeric:tabular-nums}
+.presence-stat.is-online strong{color:#16835e}
+.presence-stat.is-offline strong{color:#8b96a6}
+.presence-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.presence-group-card{min-width:0;margin:0;padding:15px 16px}
+.presence-group-heading{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding-bottom:12px;margin-bottom:4px;border-bottom:1px solid #edf1f7;
+}
+.presence-group-heading>div{display:flex;align-items:center;gap:10px}
+.presence-group-heading .eyebrow{margin:0 0 3px}
+.presence-group-heading h3{margin:0;font-size:15px}
+.presence-group-count{
+  padding:6px 9px;color:#176e53;background:#effaf5;
+  border:1px solid #d9f0e5;border-radius:9px;
+  font-size:10px;font-weight:850;white-space:nowrap;
+}
+.presence-person{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 10px;
+  padding:11px 2px;border-bottom:1px solid #eff3f8;
+}
+.presence-person:last-child{border-bottom:0}
+.presence-person-main{display:flex;align-items:center;gap:10px;min-width:0}
+.presence-dot{
+  display:inline-block;width:9px;height:9px;flex:0 0 9px;border-radius:50%;
+}
+.presence-dot.is-online{background:#20a477;box-shadow:0 0 0 4px #e8f7f0}
+.presence-dot.is-offline{background:#aab5c3;box-shadow:0 0 0 4px #f0f3f7}
+.presence-identity{min-width:0}
+.presence-identity strong,.presence-identity small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.presence-identity strong{color:#294766;font-size:11px;font-weight:850}
+.presence-identity small{margin-top:3px;color:#91a0b3;font-size:9px}
+.presence-state{
+  padding:5px 8px;border-radius:8px;font-size:9px;font-weight:850;white-space:nowrap;
+}
+.presence-state.is-online{color:#147653;background:#eaf8f1}
+.presence-state.is-offline{color:#748195;background:#f0f3f7}
+.presence-last-seen{grid-column:1/-1;padding-left:19px;color:#91a0b3;font-size:9px}
+.presence-footnote{margin:12px 3px 0;color:#8291a5;font-size:10px;line-height:1.5}
+@media(max-width:760px){
+  .presence-groups{grid-template-columns:1fr}
+}
+@media(max-width:560px){
+  .presence-intro{align-items:flex-start;flex-direction:column;padding:15px}
+  .presence-intro .btn{width:100%}
+  .presence-summary{gap:7px}
+  .presence-stat{padding:11px 10px}
+  .presence-stat strong{font-size:20px}
+  .presence-stat small{font-size:9px}
+}
