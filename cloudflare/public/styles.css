@@ -957,3 +957,62 @@ button:focus-visible{outline:3px solid rgba(65,125,205,.28);outline-offset:2px}
   .roster-note{padding:12px 14px}
   .roster-status{max-width:132px;font-size:.7rem}
 }
+
+
+/* Class assignment management */
+.assignment-intro{
+  margin:0 0 16px;
+  padding:16px 18px;
+  border:1px solid var(--line,rgba(105,125,150,.22));
+  border-radius:16px;
+  background:rgba(255,255,255,.9);
+  line-height:1.55;
+}
+.assignment-intro strong{display:block;color:var(--text,#1d2c42);font-size:1rem;margin-bottom:3px}
+.assignment-intro p{margin:0;color:var(--muted,#63748a);font-size:.88rem}
+.assignment-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+  margin-bottom:16px;
+}
+.assignment-card{display:flex;flex-direction:column;gap:12px;min-width:0}
+.assignment-heading{display:flex;align-items:center;gap:11px}
+.assignment-heading h3{margin:0;font-size:1.05rem}
+.assignment-heading .eyebrow{margin:0 0 2px}
+.assignment-current{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding:11px 13px;
+  border-radius:12px;
+  background:rgba(235,241,248,.72);
+  color:var(--muted,#63748a);
+  font-size:.84rem;
+}
+.assignment-current strong{color:var(--text,#1d2c42)}
+.leader-assignment-form{display:flex;flex-direction:column;gap:10px}
+.leader-assignment-form .field{margin:0}
+.leader-assignment-form small{line-height:1.45}
+.assignment-transfer-card{margin-top:2px}
+.transfer-form{
+  display:grid;
+  grid-template-columns:minmax(0,1.6fr) minmax(150px,.8fr) auto;
+  align-items:end;
+  gap:12px;
+}
+.transfer-form .field{margin:0;min-width:0}
+.group-leader-label{
+  display:block;
+  margin-top:4px;
+  color:var(--muted,#63748a);
+  font-size:.78rem;
+  font-weight:650;
+}
+@media(max-width:760px){
+  .assignment-grid{grid-template-columns:1fr}
+  .transfer-form{grid-template-columns:1fr}
+  .transfer-form .btn{width:100%}
+  .assignment-current{align-items:flex-start;flex-direction:column;gap:4px}
+}
