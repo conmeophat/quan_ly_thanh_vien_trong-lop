@@ -1016,3 +1016,105 @@ button:focus-visible{outline:3px solid rgba(65,125,205,.28);outline-offset:2px}
   .transfer-form .btn{width:100%}
   .assignment-current{align-items:flex-start;flex-direction:column;gap:4px}
 }
+
+
+/* Weekly scoring workspace — keep the existing page background unchanged */
+.weekly-intro{
+  display:flex;align-items:center;justify-content:space-between;gap:18px;
+  margin:0 0 15px;padding:18px 20px;
+  background:rgba(255,255,255,.92);
+  border:1px solid #e2eaf5;border-radius:17px;
+  box-shadow:0 8px 22px rgba(25,48,85,.045);
+}
+.weekly-intro .eyebrow{margin:0 0 6px}
+.weekly-intro h3{margin:0 0 6px;font-size:17px}
+.weekly-intro p:not(.eyebrow){margin:0;color:#718096;font-size:12px;line-height:1.55}
+.weekly-intro-icon{
+  display:grid;place-items:center;flex:0 0 46px;width:46px;height:46px;
+  color:#2457a6;background:#edf4ff;border:1px solid #dce9fb;
+  border-radius:14px;font-size:22px;
+}
+.weekly-control-card{margin-bottom:15px}
+.weekly-controls{
+  display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;
+  padding-bottom:15px;border-bottom:1px solid #edf1f7;
+}
+.weekly-controls .field{min-width:190px;margin:0}
+.weekly-controls .field input{min-height:40px}
+.weekly-controls .btn{min-height:40px;white-space:nowrap}
+.weekly-overview{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;
+  padding-top:14px;
+}
+.weekly-overview>span{
+  display:grid;gap:4px;min-width:0;padding:10px 12px;
+  background:#f7f9fd;border:1px solid #edf1f7;border-radius:11px;
+}
+.weekly-overview small{color:#8291a5;font-size:10px;font-weight:700}
+.weekly-overview strong{overflow:hidden;color:#294766;font-size:14px;font-weight:900;text-overflow:ellipsis;white-space:nowrap}
+.weekly-group-card{margin:0 0 14px;padding:17px 18px}
+.weekly-group-heading{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-bottom:13px;padding-bottom:12px;border-bottom:1px solid #edf1f7;
+}
+.weekly-group-heading>div:first-child{display:flex;align-items:center;gap:11px}
+.weekly-group-heading .eyebrow{margin:0 0 3px}
+.weekly-group-heading h3{margin:0;font-size:15px}
+.weekly-group-total{display:grid;justify-items:end;gap:3px}
+.weekly-group-total strong{color:#176e53;font-size:17px;font-weight:900}
+.weekly-group-total small{color:#7d9a8e;font-size:10px;font-weight:700}
+.weekly-table-wrap{
+  width:100%;overflow-x:auto;border:1px solid #e8edf5;border-radius:12px;
+  -webkit-overflow-scrolling:touch;
+}
+.weekly-table{
+  width:100%;min-width:930px;border-collapse:separate;border-spacing:0;
+  background:#fff;font-size:11px;
+}
+.weekly-table th{
+  padding:10px 7px;color:#617793;background:#f5f8fd;
+  border-bottom:1px solid #e5ebf4;text-align:center;
+  font-size:10px;font-weight:850;white-space:nowrap;
+}
+.weekly-table th:first-child{text-align:left;min-width:170px;padding-left:13px}
+.weekly-table th small{display:block;margin-top:4px;color:#95a3b4;font-size:9px;font-weight:650}
+.weekly-table td{
+  padding:7px 5px;border-bottom:1px solid #eef2f7;text-align:center;
+}
+.weekly-table tbody tr:last-child td{border-bottom:0}
+.week-member-cell{text-align:left!important;padding-left:13px!important;min-width:170px}
+.week-member-cell strong,.week-member-cell small{display:block}
+.week-member-cell strong{color:#294766;font-size:11px;font-weight:800}
+.week-member-cell small{margin-top:4px;color:#91a0b3;font-size:9px}
+.week-point-input{
+  width:66px;min-height:34px;padding:5px 6px;
+  color:#294766;background:#fbfcff;border:1px solid #dfe7f1;border-radius:8px;
+  text-align:center;font-size:11px;font-weight:750;font-variant-numeric:tabular-nums;
+}
+.week-point-input:focus{
+  outline:0;border-color:#78a6dc;background:#fff;
+  box-shadow:0 0 0 3px rgba(65,125,205,.12);
+}
+.week-total-cell{color:#176e53;background:#f2faf6;font-size:12px;font-weight:900;font-variant-numeric:tabular-nums}
+.weekly-save-bar{
+  display:flex;align-items:center;justify-content:space-between;gap:15px;
+  margin:13px 0 4px;padding:14px 16px;
+  background:rgba(255,255,255,.94);border:1px solid #e3eaf4;border-radius:14px;
+}
+.weekly-save-bar p{margin:0;max-width:680px;font-size:11px;line-height:1.5}
+.weekly-save-bar .btn{min-height:42px;flex:0 0 auto}
+@media(max-width:700px){
+  .weekly-intro{padding:15px}
+  .weekly-controls{display:grid;grid-template-columns:1fr 1fr;align-items:end}
+  .weekly-controls .field{grid-column:1/-1;min-width:0}
+  .weekly-controls .btn{width:100%}
+  .weekly-overview{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .weekly-group-card{padding:14px 12px}
+  .weekly-save-bar{align-items:stretch;flex-direction:column}
+  .weekly-save-bar .btn{width:100%}
+}
+@media(max-width:380px){
+  .weekly-overview>span{padding:9px}
+  .weekly-overview strong{font-size:12px}
+  .weekly-controls .btn{padding:8px;font-size:10px}
+}
