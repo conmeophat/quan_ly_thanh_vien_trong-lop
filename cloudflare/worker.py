@@ -1427,8 +1427,8 @@ class Default(WorkerEntrypoint):
                 if action=="reset-device":
                     if actor["role"] not in ("founder","teacher"):
                         return _response({"error":"Chỉ Người sáng lập và Giáo viên chủ nhiệm được đặt lại thiết bị."},403)
-                    if target["role"] not in ("member","leader") or not target["is_active"]:
-                        return _response({"error":"Chỉ có thể đặt lại thiết bị cho Thành viên/Tổ trưởng đang hoạt động."},400)
+                    if target["role"] not in ("member","leader") or not target["is_active"] or target["registration_status"]!="approved":
+                        return _response({"error":"Chỉ có thể đặt lại thiết bị cho Thành viên/Tổ trưởng đã được duyệt và đang hoạt động."},400)
                     await _ensure_device_bindings(database)
                     await _run(database,"DELETE FROM device_bindings WHERE user_id=?",target_id)
                     await _audit(database,int(actor["id"]),"reset_account_device",target_id,
@@ -1458,6 +1458,8 @@ class Default(WorkerEntrypoint):
                         return _response({"error":"Bạn không có quyền đặt lại mật khẩu."},403)
                     if actor["role"]=="teacher" and target["role"] in ("founder","teacher"):
                         return _response({"error":"Giáo viên không được thay đổi tài khoản Người sáng lập hoặc giáo viên khác."},403)
+                    if target["role"] not in ("member","leader") or not target["is_active"] or target["registration_status"]!="approved":
+                        return _response({"error":"Chỉ có thể đặt mật khẩu cho Thành viên/Tổ trưởng đã được duyệt và đang hoạt động."},400)
                     generated_password = "new_password" not in body
                     if generated_password:
                         if actor["role"] != "founder":
