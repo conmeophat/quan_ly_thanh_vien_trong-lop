@@ -34,7 +34,7 @@ function authForm(title,desc,fields,button,submit,link){
   app.innerHTML='<section class="auth"><div class="card"><div class="auth-heading"><span class="auth-mark">ĐT</span><p class="eyebrow">QUẢN LÝ LỚP HỌC</p></div><h1>'+title+'</h1><p class="muted">'+desc+'</p><form id="f" class="form">'+fields+'<button class="btn auth-submit" type="submit">'+button+' <span aria-hidden="true">→</span></button></form>'+(link?'<div class="auth-links">'+link+'</div>':"")+'</div></section>';
   document.querySelector("#f").onsubmit=async e=>{e.preventDefault();try{await submit(fd(e.target))}catch(x){toast(x.message)}}
 }
-function login(){authForm("Đăng nhập","Sử dụng số điện thoại và mật khẩu đã đăng ký.",field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password"),"Đăng nhập",async d=>{await api("/api/login","POST",d);await start()},'<button class="btn link" id="reg">Chưa có tài khoản? Đăng ký</button>');document.querySelector("#reg").onclick=register}
+function login(){authForm("Đăng nhập","Sử dụng tên đăng nhập được cấp hoặc số điện thoại đã đăng ký.",field("Tên đăng nhập hoặc số điện thoại","phone","text","Nhập tên đăng nhập hoặc số điện thoại")+field("Mật khẩu","password","password"),"Đăng nhập",async d=>{await api("/api/login","POST",d);await start()},'<button class="btn link" id="reg">Chưa có tài khoản? Đăng ký</button>');document.querySelector("#reg").onclick=register}
 function register(){authForm("Đăng ký thành viên","Tài khoản mới luôn phải được người quản trị duyệt. Nếu họ tên có trong danh sách lớp, hệ thống sẽ tự xếp đúng tổ theo danh sách.",field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+groupsel()+field("Mật khẩu (8–128 ký tự)","password","password"),"Gửi đăng ký",async d=>{await api("/api/register","POST",d);toast("Đã gửi đăng ký. Vui lòng chờ duyệt.");login()},'<button class="btn link" id="back">Quay lại đăng nhập</button>');document.querySelector("#back").onclick=login}
 function bootstrap(){authForm("Thiết lập người sáng lập","Nhập mã FOUNDER_SETUP_TOKEN đã đặt trong Cloudflare Secrets.",field("Mã thiết lập","setup_token","password")+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password"),"Tạo tài khoản",async d=>{await api("/api/bootstrap","POST",d);toast("Đã tạo tài khoản người sáng lập.");await start()})}
 async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;bar();await dashboard();return}catch{}userbar.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
@@ -142,7 +142,49 @@ async function accounts(el,pending){
     const actions=resetButton||removeButton?'<div class="actions">'+resetButton+removeButton+'</div>':"";
     return '<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · '+esc(x.role_label||roles[x.role]||x.role)+' · '+esc(group)+' · '+esc(status)+'</small></div>'+actions+'</div>';
   }).join(""):'<div class="empty">Chưa có tài khoản.</div>';
-  el.innerHTML='<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ. Mật khẩu gốc không thể xem lại; Người sáng lập có thể cấp mật khẩu tạm mới cho thành viên đã được duyệt.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
+  const bulkProvisionCard=me.role==="founder"?'<section class="card bulk-provision-card"><p class="eyebrow">KHỞI TẠO TÀI KHOẢN</p><h2>Tạo tài khoản cho học sinh lớp 12A1</h2><p class="muted">Tự động tạo tên đăng nhập riêng và mật khẩu ngẫu nhiên cho danh sách 47 học sinh theo đúng tổ. Tài khoản mới được kích hoạt ngay. Mật khẩu chỉ xuất hiện một lần trong file tải xuống; hệ thống chỉ lưu bản băm mật khẩu.</p><button class="btn" id="bulk-create-roster" type="button">Tạo 47 tài khoản và tải file thông tin đăng nhập <span aria-hidden="true">↓</span></button></section>':"";
+  el.innerHTML=bulkProvisionCard+'<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ. Mật khẩu gốc không thể xem lại; Người sáng lập có thể cấp mật khẩu tạm mới cho thành viên đã được duyệt.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
+  const bulkButton=el.querySelector("#bulk-create-roster");
+  if(bulkButton)bulkButton.onclick=async()=>{
+    if(!confirm("Tạo tài khoản đăng nhập cho toàn bộ danh sách lớp 12A1? Tài khoản đã tồn tại sẽ được giữ nguyên và không đặt lại mật khẩu."))return;
+    bulkButton.disabled=true;
+    bulkButton.textContent="Đang tạo tài khoản...";
+    const rows=[];
+    let created=0,existing=0,failure="";
+    for(let groupNo=1;groupNo<=4;groupNo++){
+      try{
+        const result=await api("/api/accounts/bulk-create-roster","POST",{group_no:groupNo});
+        rows.push(...(result.entries||[]));
+        created+=Number(result.created_count||0);
+        existing+=Number(result.existing_count||0);
+      }catch(error){
+        failure="Tổ "+groupNo+": "+error.message;
+        break;
+      }
+    }
+    if(rows.length){
+      const csvCell=value=>'"'+String(value??"").replace(/"/g,'""')+'"';
+      const csvRows=[
+        ["Tổ","STT","Họ và tên","Tên đăng nhập","Mật khẩu","Trạng thái"],
+        ...rows.map(row=>[
+          "Tổ "+row.group_no,row.stt,row.full_name,row.username,row.password,row.status
+        ])
+      ];
+      const csv=csvRows.map(row=>row.map(csvCell).join(",")).join("\r\n");
+      const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8"});
+      const url=URL.createObjectURL(blob);
+      const link=document.createElement("a");
+      link.href=url;
+      link.download="Tai_khoan_dang_nhap_lop_12A1.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+    const summary="Đã tạo "+created+" tài khoản mới; có "+existing+" tài khoản đã tồn tại.";
+    toast(failure?summary+" File đã tải phần xử lý được. "+failure:summary+" Đã tải file thông tin đăng nhập.");
+    await dashboard();
+  };
   const roleSelect=el.querySelector("#create-role");
   const groupField=el.querySelector("#group-field");
   const groupSelect=el.querySelector('[name="group_no"]');
