@@ -1,4 +1,4 @@
-const app=document.querySelector("#app"),userbar=document.querySelector("#userbar"),topnav=document.querySelector("#topnav");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null,maintenanceWatchTimer=null;
+const app=document.querySelector("#app"),userbar=document.querySelector("#userbar"),topnav=document.querySelector("#topnav");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null,maintenanceWatchTimer=null,maintenanceReloadTimer=null;
 
 // Ngăn menu chuột phải và các phím tắt mở DevTools thông dụng với Thành viên/Tổ trưởng.
 // Đây chỉ là biện pháp hạn chế ở giao diện; quyền sửa điểm luôn được xác thực tại Worker.
@@ -30,6 +30,7 @@ function toast(s){let x=document.querySelector("#toast");if(!x)return;x.textCont
 function showMaintenanceScreen(message="Trang web đang được bảo trì, nâng cấp. Mong mọi người quay lại sau. Cảm ơn!"){
   stopRegistrationWatch();
   stopPresenceWatch();
+  if(maintenanceReloadTimer!==null){clearInterval(maintenanceReloadTimer);maintenanceReloadTimer=null}
   me=null;
   userbar.innerHTML="";
   if(topnav)topnav.innerHTML="";
@@ -37,6 +38,17 @@ function showMaintenanceScreen(message="Trang web đang được bảo trì, nâ
   app.innerHTML='<style>.maintenance-screen{min-height:70vh;display:grid;place-items:center;padding:28px 16px}.maintenance-screen-card{width:min(100%,680px);padding:clamp(28px,5vw,52px);border:1px solid rgba(130,160,195,.2);border-radius:24px;background:linear-gradient(145deg,#132239,#1b304b);color:#edf4ff;box-shadow:0 24px 70px rgba(12,25,43,.24);text-align:center}.maintenance-screen-mark{width:58px;height:58px;margin:0 auto 20px;display:grid;place-items:center;border-radius:18px;background:linear-gradient(145deg,#397fbd,#245783);font-size:24px;font-weight:900}.maintenance-screen-card .eyebrow{color:#9cc7ef}.maintenance-screen-card h1{margin:8px 0 14px;font-size:clamp(26px,5vw,38px)}.maintenance-screen-card p{color:#c5d2e2;line-height:1.8}.maintenance-screen-status{display:inline-flex;margin:12px 0 20px;padding:8px 14px;border:1px solid rgba(255,198,115,.26);border-radius:99px;color:#ffd18a;background:rgba(255,198,115,.08);font-size:13px;font-weight:700}.maintenance-screen-card .btn{margin-top:8px}</style><section class="maintenance-screen"><div class="maintenance-screen-card"><div class="maintenance-screen-mark" aria-hidden="true">ĐT</div><p class="eyebrow">QUẢN LÝ ĐIỂM THI ĐUA · LỚP 12A1</p><h1>Trang web đang được bảo trì</h1><p>'+esc(message)+'</p><span class="maintenance-screen-status">Đang bảo trì và nâng cấp</span><p>Mong mọi người quay lại sau. Cảm ơn mọi người đã thông cảm!</p><button class="btn alt" id="maintenance-reload" type="button">Tải lại trang</button></div></section>';
   const reload=document.querySelector("#maintenance-reload");
   if(reload)reload.onclick=()=>window.location.reload();
+  const checkReopened=async()=>{
+    try{
+      const response=await fetch("/api/maintenance",{credentials:"same-origin",cache:"no-store"});
+      if(response.ok){
+        const state=await response.json();
+        if(state.enabled===false)window.location.replace("/");
+      }
+    }catch{}
+  };
+  checkReopened();
+  maintenanceReloadTimer=setInterval(checkReopened,10000);
 }
 async function api(path,method="GET",data){let r=await fetch(path,{method,credentials:"same-origin",headers:{"Content-Type":"application/json"},...(data===undefined?{}:{body:JSON.stringify(data)})});let j={};try{j=await r.json()}catch{}if(!r.ok){if(r.status===503&&j.code==="SITE_MAINTENANCE"){showMaintenanceScreen(j.error);const error=new Error(j.error||"Trang web đang được bảo trì.");error.code="SITE_MAINTENANCE";throw error}throw Error(j.error||"Yêu cầu không thành công")}return j}
 function field(label,name,type="text",placeholder=""){return '<label class="field">'+esc(label)+'<input name="'+name+'" type="'+type+'" placeholder="'+esc(placeholder)+'" required></label>'}
