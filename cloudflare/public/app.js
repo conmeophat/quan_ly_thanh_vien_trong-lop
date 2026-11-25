@@ -93,6 +93,7 @@ async function dashboard(){
         x.classList.toggle("is-active",active);
         if(active)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current");
       });
+      document.querySelectorAll(".fb-top-link").forEach(x=>x.classList.toggle("is-active",x.dataset.tab===tab));
       const title=document.querySelector("#workspace-title");
       if(title)title.textContent=tab==="weekly"?"Điểm thi đua theo tuần":tab==="presence"?"Trạng thái online":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
       panel();
