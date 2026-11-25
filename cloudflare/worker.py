@@ -1094,7 +1094,7 @@ class Default(WorkerEntrypoint):
                     if not existing["is_active"]:
                         status="Tài khoản đã khóa — không thể đăng nhập"
                     elif existing["registration_status"]=="pending":
-                        status="Đang chờ duyệt — mật khẩu đã có trong file"
+                        status="Đang chờ duyệt — chưa có quyền đăng nhập"
                     elif existing["registration_status"]=="approved":
                         status="Đã có tài khoản — mật khẩu hiện tại"
                     else:
