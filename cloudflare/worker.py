@@ -344,33 +344,46 @@ class Default(WorkerEntrypoint):
         database=self.env.DB
         if actor["role"]=="member":
             return {"user":_public_user(actor),"personal":await self._member_records(int(actor["id"]))}
+
         groups=[int(actor["group_no"])] if actor["role"]=="leader" else [1,2,3,4]
+        assignment_rows=await _all(database,"SELECT student_key,group_no FROM roster_assignments")
+        roster_group_overrides={str(row["student_key"]):int(row["group_no"]) for row in assignment_rows}
+        all_roster_keys={_name_key(name) for names in CLASS_ROSTER.values() for name in names}
+
+        rows=await _all(database,
+            "SELECT u.id,u.full_name,u.phone,u.role,u.group_no,u.is_active,u.registration_status,u.created_at,"
+            "COALESCE((SELECT SUM(s.points) FROM score_entries s WHERE s.member_id=u.id AND s.is_deleted=0),0) AS total_points "
+            "FROM users u WHERE u.role IN ('member','leader') ORDER BY u.created_at DESC,u.id DESC"
+        )
+        matched={}
+        extras=[]
+        for row in rows:
+            key=_name_key(row["full_name"])
+            if key in all_roster_keys:
+                priority=0 if row["is_active"] and row["registration_status"]=="approved" else 1 if row["is_active"] and row["registration_status"]=="pending" else 2
+                current=matched.get(key)
+                current_priority=99 if current is None else (0 if current["is_active"] and current["registration_status"]=="approved" else 1 if current["is_active"] and current["registration_status"]=="pending" else 2)
+                if current is None or priority<current_priority:
+                    matched[key]=row
+            elif row["role"]=="member" and row["is_active"] and row["registration_status"]=="approved":
+                extras.append(row)
+
         group_data=[]
         for group_no in groups:
-            roster_names=CLASS_ROSTER[group_no]
-            roster_keys={_name_key(name) for name in roster_names}
-            rows=await _all(database,
-                "SELECT u.id,u.full_name,u.phone,u.is_active,u.registration_status,u.created_at,"
-                "COALESCE((SELECT SUM(s.points) FROM score_entries s WHERE s.member_id=u.id AND s.is_deleted=0),0) AS total_points "
-                "FROM users u WHERE u.role='member' AND u.group_no=? ORDER BY u.created_at DESC,u.id DESC",
-                group_no
-            )
-            matched={}
-            extras=[]
-            for row in rows:
-                key=_name_key(row["full_name"])
-                if key in roster_keys:
-                    priority=0 if row["is_active"] and row["registration_status"]=="approved" else 1 if row["is_active"] and row["registration_status"]=="pending" else 2
-                    current=matched.get(key)
-                    current_priority=99 if current is None else (0 if current["is_active"] and current["registration_status"]=="approved" else 1 if current["is_active"] and current["registration_status"]=="pending" else 2)
-                    if current is None or priority<current_priority:
-                        matched[key]=row
-                elif row["is_active"] and row["registration_status"]=="approved":
-                    extras.append(row)
+            roster_names=[]
+            for original_group,names in CLASS_ROSTER.items():
+                for official_name in names:
+                    key=_name_key(official_name)
+                    row=matched.get(key)
+                    effective_group=int(row["group_no"]) if row else int(roster_group_overrides.get(key,original_group))
+                    if effective_group==group_no:
+                        roster_names.append(official_name)
 
             members=[]
             for official_name in roster_names:
                 row=matched.get(_name_key(official_name))
+                if row and row["role"]=="leader":
+                    continue
                 if row and row["is_active"] and row["registration_status"]=="approved":
                     members.append({
                         "id":row["id"],"full_name":official_name,"phone":row["phone"],
@@ -398,14 +411,21 @@ class Default(WorkerEntrypoint):
                     })
 
             for row in extras:
-                members.append({
-                    "id":row["id"],"full_name":row["full_name"],"phone":row["phone"],
-                    "total_points":float(row["total_points"] or 0),"status_label":"Đang hoạt động"
-                })
+                if int(row["group_no"])==group_no:
+                    members.append({
+                        "id":row["id"],"full_name":row["full_name"],"phone":row["phone"],
+                        "total_points":float(row["total_points"] or 0),"status_label":"Đang hoạt động"
+                    })
+
+            leader=await _first(database,
+                "SELECT id,full_name FROM users WHERE role='leader' AND group_no=? AND is_active=1 AND registration_status='approved' LIMIT 1",
+                group_no
+            )
             group_data.append({
                 "group_no":group_no,
-                "member_count":len(members),
-                "active_count":sum(1 for member in members if member["id"] is not None),
+                "leader":{"id":leader["id"],"full_name":leader["full_name"]} if leader else None,
+                "member_count":len(members)+(1 if leader else 0),
+                "active_count":sum(1 for member in members if member["id"] is not None)+(1 if leader else 0),
                 "total_points":sum(float(member["total_points"]) for member in members),
                 "members":members
             })
@@ -517,7 +537,9 @@ class Default(WorkerEntrypoint):
             name=_clean(body.get("full_name"),"Họ và tên",2,100)
             roster_member=_roster_entry(name)
             if roster_member:
-                group_no,name=roster_member
+                default_group,name=roster_member
+                assignment=await _first(database,"SELECT group_no FROM roster_assignments WHERE student_key=?",_name_key(name))
+                group_no=int(assignment["group_no"]) if assignment else int(default_group)
             else:
                 group_no=int(body.get("group_no",0))
                 if group_no not in (1,2,3,4):
@@ -564,6 +586,129 @@ class Default(WorkerEntrypoint):
         if path=="/api/dashboard" and method=="GET":
             return _response(await self._dashboard(actor))
 
+        if path=="/api/class/assign-leader" and method=="POST":
+            if actor["role"] not in ("founder","teacher"):
+                return _response({"error":"Chỉ Người sáng lập và Giáo viên chủ nhiệm được phân công Tổ trưởng."},403)
+            body=await self._json_body(request)
+            group_no=int(body.get("group_no") or 0)
+            member_id=int(body.get("member_id") or 0)
+            if group_no not in (1,2,3,4) or member_id<=0:
+                raise ValueError("Vui lòng chọn tổ và thành viên hợp lệ.")
+            target=await _first(database,
+                "SELECT id,full_name,role,group_no,is_active,registration_status FROM users WHERE id=?",
+                member_id
+            )
+            if not target or target["role"] not in ("member","leader") or not target["is_active"] or target["registration_status"]!="approved":
+                raise ValueError("Chỉ có thể bổ nhiệm học sinh có tài khoản đang hoạt động và đã được duyệt.")
+            if int(target["group_no"])!=group_no:
+                raise ValueError("Học sinh hiện thuộc Tổ "+str(target["group_no"])+". Hãy chuyển học sinh sang đúng tổ trước khi bổ nhiệm.")
+            current=await _first(database,
+                "SELECT id,full_name FROM users WHERE role='leader' AND group_no=? AND is_active=1 LIMIT 1",
+                group_no
+            )
+            if current and int(current["id"])==member_id:
+                return _response({"ok":True,"message":target["full_name"]+" hiện đã là Tổ trưởng Tổ "+str(group_no)+"."})
+            if target["role"]=="leader":
+                raise ValueError("Học sinh này đang là Tổ trưởng của tổ khác. Hãy điều chỉnh phân công hiện tại trước.")
+
+            old_leader=None
+            if current:
+                old_leader=await _first(database,"SELECT id,full_name FROM users WHERE id=? AND role='leader'",int(current["id"]))
+                if old_leader:
+                    await _run(database,"UPDATE users SET role='member' WHERE id=? AND role='leader'",int(old_leader["id"]))
+            try:
+                await _run(database,
+                    "UPDATE users SET role='leader' WHERE id=? AND role='member' AND group_no=? AND is_active=1 AND registration_status='approved'",
+                    member_id,group_no
+                )
+                promoted=await _first(database,"SELECT id FROM users WHERE id=? AND role='leader'",member_id)
+                if not promoted:
+                    raise ValueError("Không thể cập nhật vai trò Tổ trưởng. Hãy tải lại trang và thử lại.")
+            except Exception:
+                if old_leader:
+                    try:
+                        await _run(database,"UPDATE users SET role='leader' WHERE id=? AND role='member' AND group_no=? AND is_active=1",
+                            int(old_leader["id"]),group_no)
+                    except Exception:
+                        pass
+                raise
+            if old_leader:
+                await _audit(database,int(actor["id"]),"demote_group_leader",int(old_leader["id"]),
+                    old_leader["full_name"]+" được chuyển từ Tổ trưởng thành Thành viên Tổ "+str(group_no))
+            await _audit(database,int(actor["id"]),"assign_group_leader",member_id,
+                target["full_name"]+" được bổ nhiệm làm Tổ trưởng Tổ "+str(group_no))
+            return _response({"ok":True,"message":"Đã cập nhật Tổ trưởng Tổ "+str(group_no)+"."})
+
+        if path=="/api/class/transfer-member" and method=="POST":
+            if actor["role"] not in ("founder","teacher"):
+                return _response({"error":"Chỉ Người sáng lập và Giáo viên chủ nhiệm được chuyển thành viên giữa các tổ."},403)
+            body=await self._json_body(request)
+            target_group=int(body.get("to_group") or 0)
+            if target_group not in (1,2,3,4):
+                raise ValueError("Tổ đích phải nằm trong khoảng 1 đến 4.")
+
+            member=None
+            roster=None
+            if body.get("member_id"):
+                member_id=int(body.get("member_id") or 0)
+                member=await _first(database,
+                    "SELECT id,full_name,role,group_no,is_active,registration_status FROM users WHERE id=?",
+                    member_id
+                )
+                if not member or member["role"] not in ("member","leader"):
+                    raise ValueError("Không tìm thấy tài khoản học sinh hợp lệ.")
+                roster=_roster_entry(member["full_name"])
+            else:
+                roster=_roster_entry(body.get("full_name"))
+                if not roster:
+                    raise ValueError("Chỉ có thể chuyển tên học sinh có trong danh sách lớp. Với học sinh khác, hãy chọn tài khoản cụ thể.")
+                original_group,official_name=roster
+                matches=await _all(database,
+                    "SELECT id,full_name,role,group_no,is_active,registration_status FROM users WHERE role IN ('member','leader')"
+                )
+                same_name=[row for row in matches if _name_key(row["full_name"])==_name_key(official_name)]
+                if len(same_name)>1:
+                    raise ValueError("Có nhiều tài khoản trùng tên "+official_name+". Hãy chọn tài khoản cụ thể trong danh sách.")
+                member=same_name[0] if same_name else None
+
+            if roster:
+                original_group,official_name=roster
+                full_name=official_name
+            else:
+                full_name=member["full_name"]
+                original_group=int(member["group_no"])
+
+            if member:
+                current_group=int(member["group_no"])
+            else:
+                override=await _first(database,"SELECT group_no FROM roster_assignments WHERE student_key=?",_name_key(full_name))
+                current_group=int(override["group_no"]) if override else int(original_group)
+
+            if current_group==target_group:
+                return _response({"ok":True,"message":full_name+" hiện đã thuộc Tổ "+str(target_group)+"."})
+
+            demoted_leader=bool(member and member["role"]=="leader")
+            if member:
+                if demoted_leader:
+                    await _run(database,"UPDATE users SET role='member',group_no=? WHERE id=?",target_group,int(member["id"]))
+                else:
+                    await _run(database,"UPDATE users SET group_no=? WHERE id=?",target_group,int(member["id"]))
+
+            if roster:
+                if target_group==int(original_group):
+                    await _run(database,"DELETE FROM roster_assignments WHERE student_key=?",_name_key(full_name))
+                else:
+                    await _run(database,
+                        "INSERT INTO roster_assignments(student_key,full_name,group_no,updated_by,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP) "
+                        "ON CONFLICT(student_key) DO UPDATE SET full_name=excluded.full_name,group_no=excluded.group_no,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP",
+                        _name_key(full_name),full_name,target_group,int(actor["id"])
+                    )
+
+            await _audit(database,int(actor["id"]),"transfer_member_group",int(member["id"]) if member else None,
+                full_name+" | Tổ "+str(current_group)+" → Tổ "+str(target_group)+
+                (" | Tổ trưởng cũ được chuyển thành Thành viên" if demoted_leader else ""))
+            return _response({"ok":True,"message":"Đã chuyển "+full_name+" từ Tổ "+str(current_group)+" sang Tổ "+str(target_group)+"."})
+
         if path=="/api/accounts/bulk-create-roster" and method=="POST":
             if actor["role"] != "founder":
                 return _response({"error":"Chỉ Người sáng lập được tạo tài khoản đồng loạt cho lớp."},403)
@@ -593,10 +738,12 @@ class Default(WorkerEntrypoint):
             existing_count=0
             for index,official_name in enumerate(CLASS_ROSTER[group_no],start=1):
                 key=_name_key(official_name)
+                assignment=await _first(database,"SELECT group_no FROM roster_assignments WHERE student_key=?",key)
+                assigned_group=int(assignment["group_no"]) if assignment else group_no
                 existing=existing_by_name.get(key)
                 if existing:
-                    if int(existing["group_no"]) != group_no:
-                        await _run(database,"UPDATE users SET group_no=? WHERE id=?",group_no,int(existing["id"]))
+                    if int(existing["group_no"]) != assigned_group:
+                        await _run(database,"UPDATE users SET group_no=? WHERE id=?",assigned_group,int(existing["id"]))
                         await _audit(database,int(actor["id"]),"roster_group_corrected",int(existing["id"]),
                             official_name+" | chuyển về Tổ "+str(group_no))
                     if not existing["is_active"]:
@@ -608,22 +755,22 @@ class Default(WorkerEntrypoint):
                     else:
                         status="Đăng ký đã bị từ chối — cần kiểm tra"
                     entries.append({
-                        "group_no":group_no,"stt":index,"full_name":official_name,
+                        "group_no":assigned_group,"stt":index,"full_name":official_name,
                         "username":existing["phone"],"password":"","status":status
                     })
                     existing_count+=1
                     continue
 
-                username="12a1-t"+str(group_no)+"-"+str(index).zfill(2)
+                username="12a1-t"+str(assigned_group)+"-"+str(index).zfill(2)
                 collision=await _first(database,"SELECT id FROM users WHERE phone=?",username)
                 if collision:
                     username=username+"-"+secrets.token_hex(2)
                     while await _first(database,"SELECT id FROM users WHERE phone=?",username):
-                        username="12a1-t"+str(group_no)+"-"+str(index).zfill(2)+"-"+secrets.token_hex(3)
+                        username="12a1-t"+str(assigned_group)+"-"+str(index).zfill(2)+"-"+secrets.token_hex(3)
                 password=secrets.token_urlsafe(12)
                 password_hash=await _hash_password(password)
                 pending_creations.append({
-                    "group_no":group_no,"stt":index,"full_name":official_name,
+                    "group_no":assigned_group,"stt":index,"full_name":official_name,
                     "username":username,"password":password,"password_hash":password_hash
                 })
 
@@ -634,13 +781,13 @@ class Default(WorkerEntrypoint):
                 for item in pending_creations:
                     await _run(database,
                         "INSERT INTO users(full_name,phone,password_hash,role,group_no,is_active,registration_status) VALUES(?,?,?,'member',?,1,'approved')",
-                        item["full_name"],item["username"],item["password_hash"],group_no
+                        item["full_name"],item["username"],item["password_hash"],item["group_no"]
                     )
                     created=await _first(database,"SELECT id FROM users WHERE phone=?",item["username"])
                     created_id=int(created["id"])
                     created_ids.append(created_id)
                     await _audit(database,int(actor["id"]),"bulk_create_student_account",created_id,
-                        "Tổ "+str(group_no)+" | "+item["full_name"]+" | "+item["username"])
+                        "Tổ "+str(item["group_no"])+" | "+item["full_name"]+" | "+item["username"])
                     entries.append({
                         "group_no":group_no,"stt":item["stt"],"full_name":item["full_name"],
                         "username":item["username"],"password":item["password"],"status":"Tài khoản mới — đã kích hoạt"
