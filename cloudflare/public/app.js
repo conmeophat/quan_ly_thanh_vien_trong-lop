@@ -57,11 +57,13 @@ async function dashboard(){
     const count=d.groups.reduce((s,g)=>s+g.member_count,0);
     const points=d.groups.reduce((s,g)=>s+g.total_points,0);
     const canManage=["founder","teacher"].includes(me.role);
+    const canUpdateWeekly=["founder","teacher","leader"].includes(me.role);
     const isFounder=me.role==="founder";
     const navButton=(key,icon,label,description,countLabel="")=>'<button class="side-link '+(tab===key?"is-active":"")+'" data-tab="'+key+'" type="button"'+(tab===key?' aria-current="page"':"")+'><span class="side-icon" aria-hidden="true">'+icon+'</span><span class="side-copy"><strong>'+label+'</strong><small>'+description+'</small></span>'+(countLabel?'<span class="side-count">'+countLabel+'</span>':'<span class="side-arrow" aria-hidden="true">›</span>')+'</button>';
     app.innerHTML=
       '<div class="chess-shell"><aside class="chess-sidebar" aria-label="Điều hướng chính"><div class="sidebar-brand"><span class="sidebar-orb">ĐT</span><div><strong>TRUNG TÂM LỚP HỌC</strong><small>Khu vực quản lý</small></div></div><div class="sidebar-section-label">KHÔNG GIAN LỚP</div><nav class="side-nav">'+
       navButton("groups","▦","Tổng quan","Các tổ và điểm số")+
+      (canUpdateWeekly?navButton("weekly","▤","Điểm theo tuần","Nhập điểm từ thứ Hai đến Chủ nhật"):"")+
       (canManage?navButton("accounts","♙","Tài khoản","Duyệt và quản lý",isFounder&&d.pending_members.length?String(d.pending_members.length):""):"")+
       (canManage?navButton("assignments","♜","Phân công tổ","Tổ trưởng và thành viên"):"")+
       (isFounder?navButton("audit","◷","Nhật ký","Lịch sử hoạt động"):"")+
@@ -71,7 +73,7 @@ async function dashboard(){
       '<section class="chess-main"><div class="dashboard-head"><div class="page-intro"><p class="eyebrow">TỔNG QUAN LỚP HỌC</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Theo dõi thành tích, điểm số và hoạt động của các tổ trong lớp.</p></div><div class="page-actions"><span class="role-pill">'+esc(roles[me.role])+'</span>'+(isFounder?'<button class="btn alt notification-btn" id="enable-notifications" type="button"><span aria-hidden="true">♧</span> Bật thông báo</button>':"")+'</div></div>'+
       '<div class="grid"><div class="stat"><span>Tổ quản lý</span><strong>'+d.groups.length+'</strong></div><div class="stat"><span>Học sinh trong danh sách</span><strong>'+count+'</strong></div><div class="stat"><span>Tổng điểm</span><strong>'+n(points)+'</strong></div><div class="stat"><span>Chờ duyệt</span><strong>'+d.pending_members.length+'</strong></div></div>'+
       (isFounder&&d.pending_members.length?'<section class="notice-card"><div class="notice-icon" aria-hidden="true">!</div><div class="notice-copy"><strong>Có '+d.pending_members.length+' đăng ký mới đang chờ duyệt</strong><p>Hãy xem thông tin và xác nhận tài khoản trước khi thành viên sử dụng hệ thống.</p></div><button class="btn" type="button" data-tab="accounts">Xem đăng ký <span aria-hidden="true">→</span></button></section>':"")+
-      '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section></div>';
+      '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="weekly"?"Điểm thi đua theo tuần":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section></div>';
     document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{
       tab=b.dataset.tab;
       document.querySelectorAll(".side-link[data-tab]").forEach(x=>{
@@ -80,7 +82,7 @@ async function dashboard(){
         if(active)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current");
       });
       const title=document.querySelector("#workspace-title");
-      if(title)title.textContent=tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
+      if(title)title.textContent=tab==="weekly"?"Điểm thi đua theo tuần":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
       panel();
     });
     const notifyButton=document.querySelector("#enable-notifications");
@@ -93,10 +95,81 @@ async function dashboard(){
     panel(d);
   }catch(e){app.innerHTML='<div class="card error-card">'+esc(e.message)+'</div>'}
 }
-async function panel(data){if(!data)data=await api("/api/dashboard");let p=document.querySelector("#panel");if(!p)return;if(tab==="accounts"&&["founder","teacher"].includes(me.role))return accounts(p,data.pending_members);if(tab==="assignments"&&["founder","teacher"].includes(me.role))return assignmentsPanel(p);if(tab==="audit"&&me.role==="founder")return audit(p);if(tab==="password")return passwordPanel(p);return groups(p,data.groups)}
+async function panel(data){if(!data)data=await api("/api/dashboard");let p=document.querySelector("#panel");if(!p)return;if(tab==="weekly"&&["founder","teacher","leader"].includes(me.role))return weeklyPanel(p);if(tab==="accounts"&&["founder","teacher"].includes(me.role))return accounts(p,data.pending_members);if(tab==="assignments"&&["founder","teacher"].includes(me.role))return assignmentsPanel(p);if(tab==="audit"&&me.role==="founder")return audit(p);if(tab==="password")return passwordPanel(p);return groups(p,data.groups)}
 function updatePendingRegistrations(items){if(me?.role!=="founder")return;const list=Array.isArray(items)?items:[];if(knownPendingIds===null){knownPendingIds=new Set(list.map(x=>Number(x.id)));return}for(const item of list){const id=Number(item.id);if(!knownPendingIds.has(id)){knownPendingIds.add(id);const message="Có đăng ký mới: "+item.full_name+" · Tổ "+item.group_no;toast(message);if("Notification" in window&&Notification.permission==="granted")new Notification("Class Merit Hub",{body:message})}}}
 function startRegistrationWatch(){if(me?.role!=="founder"||registrationWatchTimer!==null)return;registrationWatchTimer=setInterval(async()=>{try{const latest=await api("/api/dashboard");updatePendingRegistrations(latest.pending_members||[])}catch{}},30000)}
 function stopRegistrationWatch(){if(registrationWatchTimer!==null){clearInterval(registrationWatchTimer);registrationWatchTimer=null}knownPendingIds=null}
+function localIsoDate(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function mondayOfWeek(value){
+  const d=new Date(value+"T12:00:00");
+  if(Number.isNaN(d.getTime()))return mondayOfWeek(localIsoDate(new Date()));
+  d.setDate(d.getDate()-((d.getDay()+6)%7));
+  return localIsoDate(d);
+}
+function shiftIsoDate(value,amount){const d=new Date(value+"T12:00:00");d.setDate(d.getDate()+amount);return localIsoDate(d)}
+function shortDate(value){return new Date(value+"T12:00:00").toLocaleDateString("vi-VN",{day:"2-digit",month:"2-digit"})}
+async function weeklyPanel(el){
+  let weekStart=mondayOfWeek(localIsoDate(new Date()));
+  const weekdays=["Thứ Hai","Thứ Ba","Thứ Tư","Thứ Năm","Thứ Sáu","Thứ Bảy","Chủ nhật"];
+  async function render(){
+    el.innerHTML='<section class="card"><p class="muted">Đang tải bảng điểm tuần...</p></section>';
+    try{
+      const data=await api("/api/weekly-scores?week_start="+encodeURIComponent(weekStart));
+      const memberCount=data.groups.reduce((total,group)=>total+group.members.length,0);
+      const filledCount=data.groups.reduce((total,group)=>total+group.filled_days,0);
+      const totalPoints=data.groups.reduce((total,group)=>total+group.week_total,0);
+      const groupHtml=data.groups.map(group=>{
+        const rows=group.members.map(member=>{
+          const cells=data.dates.map((day,index)=>{
+            const value=member.days[day];
+            return '<td><input class="week-point-input" type="number" inputmode="decimal" min="-100" max="100" step="0.5" data-member-id="'+member.id+'" data-score-date="'+day+'" value="'+(value===null?"":String(value))+'" aria-label="Điểm '+weekdays[index]+' của '+esc(member.full_name)+'" placeholder="—"></td>';
+          }).join("");
+          return '<tr data-week-row><td class="week-member-cell"><strong>'+esc(member.full_name)+'</strong><small>Đã nhập '+member.filled_days+'/7 ngày</small></td>'+cells+'<td class="week-total-cell" data-week-total>'+n(member.week_total)+'</td></tr>';
+        }).join("");
+        return '<section class="card weekly-group-card"><div class="weekly-group-heading"><div><span class="group-symbol">T'+group.group_no+'</span><div><p class="eyebrow">BẢNG ĐIỂM TỔ '+group.group_no+'</p><h3>Tổ '+group.group_no+'</h3></div></div><div class="weekly-group-total"><strong>'+n(group.week_total)+'</strong><small>điểm trong tuần</small></div></div><div class="weekly-table-wrap"><table class="weekly-table"><thead><tr><th>Thành viên</th>'+data.dates.map((day,index)=>'<th>'+weekdays[index]+'<small>'+shortDate(day)+'</small></th>').join("")+'<th>Tổng tuần</th></tr></thead><tbody>'+(rows||'<tr><td colspan="9" class="empty">Tổ này chưa có tài khoản thành viên hoạt động.</td></tr>')+'</tbody></table></div></section>';
+      }).join("");
+      el.innerHTML=
+        '<section class="weekly-intro"><div><p class="eyebrow">THEO DÕI THI ĐUA</p><h3>Chấm điểm từng ngày trong tuần</h3><p>Tổ trưởng nhập điểm cho từng thành viên của tổ mình từ Thứ Hai đến Chủ nhật. Có thể nhập điểm âm, điểm dương hoặc 0; để trống nếu ngày đó chưa có điểm.</p></div><span class="weekly-intro-icon" aria-hidden="true">▦</span></section>'+
+        '<section class="card weekly-control-card"><div class="weekly-controls"><button class="btn alt" id="week-prev" type="button" aria-label="Tuần trước">← Tuần trước</button><label class="field">Ngày bắt đầu tuần (Thứ Hai)<input id="week-picker" type="date" value="'+data.week_start+'"></label><button class="btn alt" id="week-next" type="button" aria-label="Tuần sau">Tuần sau →</button><button class="btn link" id="week-current" type="button">Tuần hiện tại</button></div><div class="weekly-overview"><span><small>Khoảng thời gian</small><strong>'+shortDate(data.week_start)+' – '+shortDate(data.week_end)+'</strong></span><span><small>Thành viên</small><strong>'+memberCount+'</strong></span><span><small>Ô điểm đã ghi</small><strong>'+filledCount+'</strong></span><span><small>Tổng điểm tuần</small><strong>'+n(totalPoints)+'</strong></span></div></section>'+
+        (groupHtml||'<section class="card"><div class="empty">Chưa có thành viên đã được duyệt để chấm điểm.</div></section>')+
+        '<div class="weekly-save-bar"><p class="muted">Ô trống sẽ được hiểu là chưa ghi điểm. Khi lưu, ô đã có điểm nhưng được xóa trắng sẽ bị xóa bản ghi của ngày đó.</p><button class="btn" id="save-week-scores" type="button">Lưu điểm cả tuần <span aria-hidden="true">→</span></button></div>';
+      el.querySelector("#week-prev").onclick=()=>{weekStart=shiftIsoDate(weekStart,-7);render()};
+      el.querySelector("#week-next").onclick=()=>{weekStart=shiftIsoDate(weekStart,7);render()};
+      el.querySelector("#week-current").onclick=()=>{weekStart=mondayOfWeek(localIsoDate(new Date()));render()};
+      el.querySelector("#week-picker").onchange=event=>{if(event.target.value){weekStart=mondayOfWeek(event.target.value);render()}};
+      el.querySelectorAll(".week-point-input").forEach(input=>input.oninput=()=>{
+        const row=input.closest("[data-week-row]");
+        const sum=[...row.querySelectorAll(".week-point-input")].reduce((value,item)=>value+(item.value.trim()===""?0:Number(item.value||0)),0);
+        row.querySelector("[data-week-total]").textContent=n(sum);
+      });
+      el.querySelector("#save-week-scores").onclick=async()=>{
+        const inputs=[...el.querySelectorAll(".week-point-input")];
+        const invalid=inputs.find(input=>!input.checkValidity());
+        if(invalid){invalid.reportValidity();invalid.focus();return}
+        const scores=inputs.map(input=>({
+          member_id:Number(input.dataset.memberId),
+          date:input.dataset.scoreDate,
+          points:input.value.trim()===""?null:Number(input.value)
+        }));
+        const button=el.querySelector("#save-week-scores");
+        button.disabled=true;
+        button.textContent="Đang lưu điểm...";
+        try{
+          const result=await api("/api/weekly-scores","POST",{week_start:weekStart,scores});
+          toast("Đã lưu "+result.saved+" ô điểm; xóa "+result.removed+" ô trống.");
+          await render();
+        }catch(error){
+          toast(error.message);
+          button.disabled=false;
+          button.innerHTML='Lưu điểm cả tuần <span aria-hidden="true">→</span>';
+        }
+      };
+    }catch(error){
+      el.innerHTML='<section class="card error-card">'+esc(error.message)+'</section>';
+    }
+  }
+  await render();
+}
 function passwordPanel(el){el.innerHTML='<section class="card"><div class="row between"><h2>Đổi mật khẩu</h2><button class="btn alt" id="back-password">Quay lại</button></div><p class="muted">Nhập mật khẩu hiện tại và mật khẩu mới. Mật khẩu mới phải có từ 8 đến 128 ký tự.</p><form id="change-password" class="form">'+field("Mật khẩu hiện tại","old_password","password")+field("Mật khẩu mới","new_password","password")+field("Nhập lại mật khẩu mới","confirm_password","password")+'<button class="btn">Cập nhật mật khẩu</button></form></section>';el.querySelector("#back-password").onclick=dashboard;el.querySelector("#change-password").onsubmit=async e=>{e.preventDefault();const data=fd(e.target);if(data.new_password!==data.confirm_password){toast("Hai mật khẩu mới không khớp.");return}delete data.confirm_password;try{await api("/api/password/change","POST",data);toast("Đã đổi mật khẩu. Vui lòng đăng nhập lại.");stopRegistrationWatch();me=null;await start()}catch(x){toast(x.message)}}}
 function groups(el,list){
   el.innerHTML='<div class="roster-note"><strong>Danh sách lớp 12A1</strong><span>Các tên đã được nhập theo danh sách giáo viên cung cấp. Học sinh chưa kích hoạt tài khoản vẫn hiển thị; chỉ tài khoản đã được duyệt mới có hồ sơ và chức năng ghi điểm.</span></div><div class="groups">'+list.map(g=>
