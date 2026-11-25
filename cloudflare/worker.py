@@ -182,6 +182,35 @@ async def _ensure_device_bindings(database):
         )
 
 
+async def _ensure_leader_notification_permissions(database):
+    try:
+        await _first(database,"SELECT user_id FROM leader_notification_permissions LIMIT 1")
+    except Exception:
+        await _run(database,
+            "CREATE TABLE IF NOT EXISTS leader_notification_permissions ("
+            "user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,"
+            "device_hash TEXT NOT NULL UNIQUE,"
+            "granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+
+
+async def _leader_notifications_enabled(database,actor):
+    if actor["role"] != "leader":
+        return True
+    await _ensure_leader_notification_permissions(database)
+    binding=await _first(database,
+        "SELECT device_hash FROM device_bindings WHERE user_id=?",int(actor["id"])
+    )
+    if not binding:
+        return False
+    permission=await _first(database,
+        "SELECT user_id FROM leader_notification_permissions WHERE user_id=? AND device_hash=?",
+        int(actor["id"]),str(binding["device_hash"])
+    )
+    return bool(permission)
+
+
 async def _ensure_credential_vault(database):
     try:
         await _first(database, "SELECT user_id FROM credential_vault LIMIT 1")
@@ -422,12 +451,15 @@ class Default(WorkerEntrypoint):
                 return _response({"error":"Đã xảy ra lỗi máy chủ. Vui lòng thử lại."},500)
         if path in ("/", "/index.html") and request.method.upper() in ("GET", "HEAD"):
             try:
-                if await self._maintenance_enabled(self.env.DB):
-                    actor = await self._actor(request, self.env.DB)
-                    if not actor or actor["role"] != "founder":
-                        return self._maintenance_page()
+                database = self.env.DB
+                maintenance_enabled = await self._maintenance_enabled(database)
+                actor = await self._actor(request, database)
+                if maintenance_enabled and (not actor or actor["role"] != "founder"):
+                    return self._maintenance_page()
+                if actor and actor["role"] == "leader" and not await _leader_notifications_enabled(database, actor):
+                    return self._leader_notification_required_page()
             except Exception as exc:
-                console.error("Class Merit Hub maintenance page check failed", repr(exc))
+                console.error("Class Merit Hub access gate check failed", repr(exc))
         return await self.env.ASSETS.fetch(request)
 
     async def _maintenance_enabled(self, database):
@@ -443,6 +475,91 @@ class Default(WorkerEntrypoint):
             )
             row = await _first(database, "SELECT setting_value FROM site_settings WHERE setting_key='maintenance_enabled'")
         return bool(row and str(row["setting_value"]).strip().lower() in ("1", "true", "yes", "on"))
+
+    def _leader_notification_required_page(self):
+        html = """<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Bật thông báo để tiếp tục</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eaf1ff;background:radial-gradient(circle at 15% 10%,#214a70 0,transparent 34%),linear-gradient(145deg,#101827,#17283d 58%,#0c1422)}
+.card{width:min(100%,620px);padding:clamp(26px,6vw,50px);border:1px solid rgba(255,255,255,.13);border-radius:24px;background:rgba(16,29,47,.9);box-shadow:0 28px 90px rgba(0,0,0,.38);text-align:center}
+.mark{width:58px;height:58px;display:grid;place-items:center;margin:0 auto 20px;border-radius:18px;background:linear-gradient(145deg,#2b78b8,#204b7d);font-size:25px;font-weight:900}
+.eyebrow{margin:0 0 12px;color:#8eb9e8;font-size:12px;font-weight:800;letter-spacing:.16em}
+h1{margin:0;font-size:clamp(25px,5vw,36px);line-height:1.25}.message{margin:17px auto 0;max-width:490px;color:#c0ccdb;font-size:15px;line-height:1.8}
+.notice{margin:22px 0;padding:13px 15px;border:1px solid rgba(112,175,232,.24);border-radius:13px;background:rgba(68,132,190,.1);color:#cbdcf0;font-size:13px;line-height:1.65;text-align:left}
+button{width:100%;padding:14px 18px;border:0;border-radius:12px;background:linear-gradient(135deg,#3989ce,#25639f);color:white;font-size:14px;font-weight:800;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}.hint{min-height:24px;margin:13px 0 0;color:#ffd18a;font-size:13px;line-height:1.6}
+footer{margin-top:23px;color:#8193a9;font-size:12px}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="mark" aria-hidden="true">ĐT</div>
+  <p class="eyebrow">YÊU CẦU DÀNH RIÊNG CHO TỔ TRƯỞNG</p>
+  <h1>Bật thông báo để tiếp tục</h1>
+  <p class="message">Để sử dụng trang web, Tổ trưởng cần cho phép trình duyệt gửi thông báo. Khi quyền thông báo được bật, hệ thống mới mở quyền truy cập vào khu vực Tổ trưởng.</p>
+  <div class="notice" id="permission-help">Hãy chọn <b>Bật thông báo và tiếp tục</b>, sau đó chọn <b>Cho phép / Allow</b> trong cửa sổ của trình duyệt.</div>
+  <button id="enable-notifications" type="button">Bật thông báo và tiếp tục</button>
+  <p class="hint" id="permission-message" role="status"></p>
+  <footer>Quyền này chỉ bắt buộc với tài khoản Tổ trưởng. Các vai trò khác không bị ảnh hưởng.</footer>
+</main>
+<script>
+const button=document.getElementById("enable-notifications");
+const message=document.getElementById("permission-message");
+const help=document.getElementById("permission-help");
+async function saveAndContinue(){
+  const response=await fetch("/api/leader/notification-permission",{
+    method:"POST",credentials:"same-origin",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({permission:"granted"})
+  });
+  let result={};try{result=await response.json()}catch(_){}
+  if(!response.ok)throw new Error(result.error||"Chưa lưu được quyền thông báo.");
+  message.textContent="Đã bật thông báo. Đang mở khu vực Tổ trưởng...";
+  window.location.replace("/");
+}
+async function enableNotifications(){
+  if(!("Notification" in window)){
+    help.textContent="Trình duyệt hiện tại không hỗ trợ thông báo. Hãy mở website bằng một trình duyệt có hỗ trợ thông báo.";
+    message.textContent="Không thể tiếp tục khi trình duyệt không hỗ trợ thông báo.";
+    return;
+  }
+  if(Notification.permission==="granted"){await saveAndContinue();return}
+  if(Notification.permission==="denied"){
+    help.textContent="Bạn đã chặn thông báo trước đó. Hãy mở Cài đặt trang web trong trình duyệt, vào Quyền / Notifications (Thông báo), đổi thành Cho phép / Allow, rồi tải lại trang.";
+    message.textContent="Trình duyệt đang chặn thông báo nên chưa thể tiếp tục.";
+    return;
+  }
+  button.disabled=true;
+  message.textContent="Đang chờ bạn chọn Cho phép...";
+  try{
+    const permission=await Notification.requestPermission();
+    if(permission==="granted"){await saveAndContinue();return}
+    if(permission==="denied"){
+      help.textContent="Bạn đã chọn Chặn. Hãy mở Cài đặt trang web trong trình duyệt, vào Quyền / Notifications (Thông báo), đổi thành Cho phép / Allow, rồi tải lại trang.";
+      message.textContent="Cần bật quyền thông báo mới được sử dụng website.";
+    }else{
+      message.textContent="Bạn chưa cho phép thông báo. Hãy chọn nút bên dưới và chọn Cho phép.";
+    }
+  }catch(error){message.textContent=error.message||"Không thể bật thông báo trên trình duyệt này."}
+  button.disabled=false;
+}
+button.addEventListener("click",enableNotifications);
+if("Notification" in window&&Notification.permission==="granted")saveAndContinue().catch(error=>message.textContent=error.message);
+</script>
+</body>
+</html>"""
+        headers = Headers.new()
+        headers.set("Content-Type","text/html; charset=utf-8")
+        headers.set("Cache-Control","no-store, no-cache, must-revalidate")
+        headers.set("X-Content-Type-Options","nosniff")
+        headers.set("Referrer-Policy","same-origin")
+        headers.set("X-Robots-Tag","noindex, nofollow")
+        return JSResponse.new(html,_obj(status=428,headers=headers))
 
     def _maintenance_page(self):
         html = """<!doctype html>
@@ -1031,6 +1148,49 @@ setInterval(checkMaintenanceReopened, 10000);
         actor=maintenance_actor or await self._actor(request,database)
         if not actor:
             return _response({"error":"Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."},401)
+        if path=="/api/leader/notification-permission":
+            if actor["role"]!="leader":
+                return _response({"error":"Chỉ tài khoản Tổ trưởng cần xác nhận quyền thông báo."},403)
+            await _ensure_leader_notification_permissions(database)
+            binding=await _first(database,
+                "SELECT device_hash FROM device_bindings WHERE user_id=?",int(actor["id"])
+            )
+            if not binding:
+                return _response({"error":"Thiết bị của tài khoản Tổ trưởng chưa được liên kết."},403)
+            device_hash=str(binding["device_hash"])
+            existing=await _first(database,
+                "SELECT user_id FROM leader_notification_permissions WHERE user_id=? AND device_hash=?",
+                int(actor["id"]),device_hash
+            )
+            if method=="GET":
+                return _response({"enabled":bool(existing),"permission":"granted" if existing else "default"})
+            if method=="POST":
+                body=await self._json_body(request)
+                permission=str(body.get("permission") or "").strip().lower()
+                if permission not in ("granted","denied","default","unsupported"):
+                    raise ValueError("Trạng thái quyền thông báo không hợp lệ.")
+                if permission=="granted":
+                    await _run(database,
+                        "INSERT INTO leader_notification_permissions(user_id,device_hash,granted_at,updated_at) "
+                        "VALUES(?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) "
+                        "ON CONFLICT(user_id) DO UPDATE SET device_hash=excluded.device_hash,granted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP",
+                        int(actor["id"]),device_hash
+                    )
+                else:
+                    await _run(database,"DELETE FROM leader_notification_permissions WHERE user_id=?",int(actor["id"]))
+                if bool(existing)!=(permission=="granted"):
+                    await _audit(database,int(actor["id"]),
+                        "leader_notification_permission_"+permission,int(actor["id"]),
+                        "Trạng thái quyền thông báo của Tổ trưởng: "+permission
+                    )
+                return _response({"ok":True,"enabled":permission=="granted","permission":permission})
+            return _response({"error":"Phương thức không được hỗ trợ."},405)
+        if actor["role"]=="leader" and path!="/api/me":
+            if not await _leader_notifications_enabled(database,actor):
+                return _response({
+                    "code":"LEADER_NOTIFICATION_REQUIRED",
+                    "error":"Tổ trưởng cần bật quyền thông báo của trình duyệt trước khi sử dụng website."
+                },428)
         if path=="/api/maintenance" and method=="GET":
             return _response({"enabled":maintenance_enabled})
         if path=="/api/maintenance" and method=="POST":
