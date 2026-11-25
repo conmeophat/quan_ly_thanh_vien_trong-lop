@@ -1070,7 +1070,7 @@ class Default(WorkerEntrypoint):
                             official_name+" | chuyển về Tổ "+str(assigned_group))
 
                     password=""
-                    if existing["is_active"] and existing["registration_status"] in ("approved","pending"):
+                    if existing["is_active"] and existing["registration_status"]=="approved":
                         password=await _load_credential(
                             database,int(existing["id"]),str(existing["password_hash"]),vault_secret
                         )
