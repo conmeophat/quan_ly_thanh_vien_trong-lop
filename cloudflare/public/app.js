@@ -1,4 +1,4 @@
-const app=document.querySelector("#app"),userbar=document.querySelector("#userbar"),topnav=document.querySelector("#topnav");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null;
+const app=document.querySelector("#app"),userbar=document.querySelector("#userbar"),topnav=document.querySelector("#topnav");let me=null,tab="groups",knownPendingIds=null,registrationWatchTimer=null,presenceWatchTimer=null,presencePanelTimer=null,maintenanceWatchTimer=null;
 
 // Ngăn menu chuột phải và các phím tắt mở DevTools thông dụng với Thành viên/Tổ trưởng.
 // Đây chỉ là biện pháp hạn chế ở giao diện; quyền sửa điểm luôn được xác thực tại Worker.
@@ -26,8 +26,19 @@ const roles={founder:"Người sáng lập",teacher:"Giáo viên chủ nhiệm",
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const n=v=>Number(v||0).toLocaleString("vi-VN",{maximumFractionDigits:2});
 const fd=f=>Object.fromEntries(new FormData(f).entries());
-function toast(s){let x=document.querySelector("#toast");x.textContent=s;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2800)}
-async function api(path,method="GET",data){let r=await fetch(path,{method,credentials:"same-origin",headers:{"Content-Type":"application/json"},...(data===undefined?{}:{body:JSON.stringify(data)})});let j={};try{j=await r.json()}catch{}if(!r.ok)throw Error(j.error||"Yêu cầu không thành công");return j}
+function toast(s){let x=document.querySelector("#toast");if(!x)return;x.textContent=s;x.classList.add("show");setTimeout(()=>x.classList.remove("show"),2800)}
+function showMaintenanceScreen(message="Trang web đang được bảo trì, nâng cấp. Mong mọi người quay lại sau. Cảm ơn!"){
+  stopRegistrationWatch();
+  stopPresenceWatch();
+  me=null;
+  userbar.innerHTML="";
+  if(topnav)topnav.innerHTML="";
+  document.title="Website đang bảo trì";
+  app.innerHTML='<style>.maintenance-screen{min-height:70vh;display:grid;place-items:center;padding:28px 16px}.maintenance-screen-card{width:min(100%,680px);padding:clamp(28px,5vw,52px);border:1px solid rgba(130,160,195,.2);border-radius:24px;background:linear-gradient(145deg,#132239,#1b304b);color:#edf4ff;box-shadow:0 24px 70px rgba(12,25,43,.24);text-align:center}.maintenance-screen-mark{width:58px;height:58px;margin:0 auto 20px;display:grid;place-items:center;border-radius:18px;background:linear-gradient(145deg,#397fbd,#245783);font-size:24px;font-weight:900}.maintenance-screen-card .eyebrow{color:#9cc7ef}.maintenance-screen-card h1{margin:8px 0 14px;font-size:clamp(26px,5vw,38px)}.maintenance-screen-card p{color:#c5d2e2;line-height:1.8}.maintenance-screen-status{display:inline-flex;margin:12px 0 20px;padding:8px 14px;border:1px solid rgba(255,198,115,.26);border-radius:99px;color:#ffd18a;background:rgba(255,198,115,.08);font-size:13px;font-weight:700}.maintenance-screen-card .btn{margin-top:8px}</style><section class="maintenance-screen"><div class="maintenance-screen-card"><div class="maintenance-screen-mark" aria-hidden="true">ĐT</div><p class="eyebrow">QUẢN LÝ ĐIỂM THI ĐUA · LỚP 12A1</p><h1>Trang web đang được bảo trì</h1><p>'+esc(message)+'</p><span class="maintenance-screen-status">Đang bảo trì và nâng cấp</span><p>Mong mọi người quay lại sau. Cảm ơn mọi người đã thông cảm!</p><button class="btn alt" id="maintenance-reload" type="button">Tải lại trang</button></div></section>';
+  const reload=document.querySelector("#maintenance-reload");
+  if(reload)reload.onclick=()=>window.location.reload();
+}
+async function api(path,method="GET",data){let r=await fetch(path,{method,credentials:"same-origin",headers:{"Content-Type":"application/json"},...(data===undefined?{}:{body:JSON.stringify(data)})});let j={};try{j=await r.json()}catch{}if(!r.ok){if(r.status===503&&j.code==="SITE_MAINTENANCE"){showMaintenanceScreen(j.error);const error=new Error(j.error||"Trang web đang được bảo trì.");error.code="SITE_MAINTENANCE";throw error}throw Error(j.error||"Yêu cầu không thành công")}return j}
 function field(label,name,type="text",placeholder=""){return '<label class="field">'+esc(label)+'<input name="'+name+'" type="'+type+'" placeholder="'+esc(placeholder)+'" required></label>'}
 function groupsel(){return '<label class="field">Tổ<select name="group_no" required><option value="1">Tổ 1</option><option value="2">Tổ 2</option><option value="3">Tổ 3</option><option value="4">Tổ 4</option></select></label>'}
 function authForm(title,desc,fields,button,submit,link){
@@ -37,7 +48,7 @@ function authForm(title,desc,fields,button,submit,link){
 function login(){authForm("Đăng nhập","Sử dụng tên đăng nhập được cấp hoặc số điện thoại đã đăng ký.",field("Tên đăng nhập hoặc số điện thoại","phone","text","Nhập tên đăng nhập hoặc số điện thoại")+field("Mật khẩu","password","password"),"Đăng nhập",async d=>{await api("/api/device/init","POST",{});await api("/api/login","POST",d);await start()},'<button class="btn link" id="reg">Chưa có tài khoản? Đăng ký</button>');document.querySelector("#reg").onclick=register}
 function register(){authForm("Đăng ký thành viên","Tài khoản mới luôn phải được người quản trị duyệt. Nếu họ tên có trong danh sách lớp, hệ thống sẽ tự xếp đúng tổ theo danh sách.",field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+groupsel()+field("Mật khẩu (8–128 ký tự)","password","password"),"Gửi đăng ký",async d=>{await api("/api/register","POST",d);toast("Đã gửi đăng ký. Vui lòng chờ duyệt.");login()},'<button class="btn link" id="back">Quay lại đăng nhập</button>');document.querySelector("#back").onclick=login}
 function bootstrap(){authForm("Thiết lập người sáng lập","Nhập mã FOUNDER_SETUP_TOKEN đã đặt trong Cloudflare Secrets.",field("Mã thiết lập","setup_token","password")+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password"),"Tạo tài khoản",async d=>{await api("/api/bootstrap","POST",d);toast("Đã tạo tài khoản người sáng lập.");await start()})}
-async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;bar();await dashboard();return}catch{}userbar.innerHTML="";if(topnav)topnav.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
+async function start(){try{let status=await api("/api/bootstrap/status");try{me=(await api("/api/me")).user;bar();await dashboard();return}catch(e){if(e.code==="SITE_MAINTENANCE")return}userbar.innerHTML="";if(topnav)topnav.innerHTML="";status.founder_exists?login():bootstrap()}catch(e){if(e.code==="SITE_MAINTENANCE")return;app.innerHTML='<div class="card"><h2>Chưa kết nối được hệ thống</h2><p>'+esc(e.message)+'</p></div>'}}
 function bar(){
   const initials=String(me.full_name||"").trim().split(/\s+/).slice(-2).map(x=>x[0]||"").join("").toUpperCase();
   userbar.innerHTML='<div class="user-menu"><div class="user-avatar" aria-hidden="true">'+esc(initials||"TV")+'</div><div class="user-identity"><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div><button class="btn logout-btn" id="logout" type="button"><span aria-hidden="true">↪</span> Đăng xuất</button></div>';
@@ -55,6 +66,7 @@ function bar(){
 async function dashboard(){
   bar();
   startPresenceWatch();
+  startMaintenanceWatch();
   try{
     let d=await api("/api/dashboard");
     if(d.personal){
@@ -73,6 +85,12 @@ async function dashboard(){
     const canManage=["founder","teacher"].includes(me.role);
     const canUpdateWeekly=["founder","teacher","leader"].includes(me.role);
     const isFounder=me.role==="founder";
+    let maintenanceState={enabled:false};
+    if(isFounder){
+      try{maintenanceState=await api("/api/maintenance")}catch(error){toast(error.message)}
+    }
+    const maintenanceControl=isFounder?
+      '<section class="card maintenance-control-card"><div><p class="eyebrow">QUẢN TRỊ WEBSITE</p><h2>'+(maintenanceState.enabled?"Website đang bảo trì":"Website đang hoạt động")+'</h2><p class="muted">'+(maintenanceState.enabled?"Giáo viên, Tổ trưởng và Thành viên đang bị tạm chặn truy cập. Người sáng lập vẫn có thể sử dụng và nâng cấp hệ thống.":"Website đang mở cho Giáo viên chủ nhiệm, Tổ trưởng và Thành viên truy cập bình thường.")+'</p></div><div class="maintenance-control-actions"><span class="role-pill">'+(maintenanceState.enabled?"ĐANG BẢO TRÌ":"ĐANG HOẠT ĐỘNG")+'</span><button class="btn '+(maintenanceState.enabled?"":"alt")+'" id="toggle-maintenance" type="button">'+(maintenanceState.enabled?"Mở trang web sau bảo trì":"Bật bảo trì trang web")+'</button></div></section>':"";
     const rightSidebar='<aside class="fb-right-sidebar"><section class="fb-right-card"><div class="fb-right-card-head"><h3>Các tổ trong lớp</h3><span>12A1</span></div>'+d.groups.map(group=>'<div class="fb-right-group"><span class="fb-right-group-symbol">T'+group.group_no+'</span><div><strong>Tổ '+group.group_no+'</strong><small>'+group.member_count+' thành viên · '+(group.leader?esc(group.leader.full_name):"Chưa có tổ trưởng")+'</small></div></div>').join("")+'</section><section class="fb-right-card"><h3>Không gian quản lý</h3><p class="fb-right-copy">Theo dõi điểm thi đua, quản lý thành viên và cập nhật hoạt động lớp học tại các mục điều hướng.</p><div class="fb-right-line"><span>Vai trò của bạn</span><strong>'+esc(roles[me.role])+'</strong></div></section></aside>';
     const navButton=(key,icon,label,description,countLabel="")=>'<button class="side-link '+(tab===key?"is-active":"")+'" data-tab="'+key+'" type="button"'+(tab===key?' aria-current="page"':"")+'><span class="side-icon" aria-hidden="true">'+icon+'</span><span class="side-copy"><strong>'+label+'</strong><small>'+description+'</small></span>'+(countLabel?'<span class="side-count">'+countLabel+'</span>':'<span class="side-arrow" aria-hidden="true">›</span>')+'</button>';
     app.innerHTML=
@@ -87,6 +105,7 @@ async function dashboard(){
       (["founder","teacher","leader"].includes(me.role)?navButton("password","⚙","Đổi mật khẩu","Bảo mật tài khoản"):"")+
       '</nav><div class="sidebar-spacer"></div><div class="sidebar-user"><span class="sidebar-user-dot"></span><div><strong>'+esc(me.full_name)+'</strong><small>'+esc(roles[me.role])+'</small></div></div></aside>'+
       '<section class="chess-main"><div class="dashboard-head"><div class="page-intro"><p class="eyebrow">TỔNG QUAN LỚP HỌC</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Theo dõi thành tích, điểm số và hoạt động của các tổ trong lớp.</p></div><div class="page-actions"><span class="role-pill">'+esc(roles[me.role])+'</span>'+(isFounder?'<button class="btn alt notification-btn" id="enable-notifications" type="button"><span aria-hidden="true">♧</span> Bật thông báo</button>':"")+'</div></div>'+
+      maintenanceControl+
       '<div class="grid"><div class="stat"><span>Tổ quản lý</span><strong>'+d.groups.length+'</strong></div><div class="stat"><span>Học sinh trong danh sách</span><strong>'+count+'</strong></div><div class="stat"><span>Tổng điểm</span><strong>'+n(points)+'</strong></div><div class="stat"><span>Chờ duyệt</span><strong>'+d.pending_members.length+'</strong></div></div>'+
       (isFounder&&d.pending_members.length?'<section class="notice-card"><div class="notice-icon" aria-hidden="true">!</div><div class="notice-copy"><strong>Có '+d.pending_members.length+' đăng ký mới đang chờ duyệt</strong><p>Hãy xem thông tin và xác nhận tài khoản trước khi thành viên sử dụng hệ thống.</p></div><button class="btn" type="button" data-tab="accounts">Xem đăng ký <span aria-hidden="true">→</span></button></section>':"")+
       '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="weekly"?"Điểm thi đua theo tuần":tab==="presence"?"Trạng thái online":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section>'+rightSidebar+'</div>';
@@ -102,6 +121,25 @@ async function dashboard(){
       if(title)title.textContent=tab==="weekly"?"Điểm thi đua theo tuần":tab==="presence"?"Trạng thái online":tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
       panel();
     });
+    const maintenanceButton=document.querySelector("#toggle-maintenance");
+    if(maintenanceButton)maintenanceButton.onclick=async()=>{
+      const enabled=!maintenanceState.enabled;
+      const question=enabled
+        ?"Bật chế độ bảo trì ngay? Giáo viên chủ nhiệm, Tổ trưởng và Thành viên sẽ không thể truy cập website. Chỉ Người sáng lập tiếp tục sử dụng được."
+        :"Mở lại website sau bảo trì? Giáo viên chủ nhiệm, Tổ trưởng và Thành viên sẽ được truy cập trở lại.";
+      if(!confirm(question))return;
+      maintenanceButton.disabled=true;
+      maintenanceButton.textContent="Đang cập nhật...";
+      try{
+        const result=await api("/api/maintenance","POST",{enabled});
+        maintenanceState.enabled=result.enabled;
+        toast(enabled?"Đã bật chế độ bảo trì. Người sáng lập vẫn có thể làm việc bình thường.":"Đã mở lại website cho mọi người.");
+        await dashboard();
+      }catch(error){
+        if(error.code!=="SITE_MAINTENANCE")toast(error.message);
+        if(maintenanceButton.isConnected)maintenanceButton.disabled=false;
+      }
+    };
     const notifyButton=document.querySelector("#enable-notifications");
     if(notifyButton)notifyButton.onclick=async()=>{
       if(!("Notification" in window)){toast("Trình duyệt này không hỗ trợ thông báo.");return}
@@ -110,9 +148,18 @@ async function dashboard(){
       notifyButton.classList.toggle("is-enabled",permission==="granted");
     };
     panel(d);
-  }catch(e){app.innerHTML='<div class="card error-card">'+esc(e.message)+'</div>'}
+  }catch(e){if(e.code==="SITE_MAINTENANCE")return;app.innerHTML='<div class="card error-card">'+esc(e.message)+'</div>'}
 }
 async function panel(data){if(presencePanelTimer!==null&&tab!=="presence"){clearInterval(presencePanelTimer);presencePanelTimer=null}if(!data)data=await api("/api/dashboard");let p=document.querySelector("#panel");if(!p)return;if(tab==="presence"&&["founder","teacher"].includes(me.role))return presencePanel(p);if(tab==="weekly"&&["founder","teacher","leader"].includes(me.role))return weeklyPanel(p);if(tab==="accounts"&&["founder","teacher"].includes(me.role))return accounts(p,data.pending_members);if(tab==="assignments"&&["founder","teacher"].includes(me.role))return assignmentsPanel(p);if(tab==="audit"&&me.role==="founder")return audit(p);if(tab==="password"&&["founder","teacher","leader"].includes(me.role))return passwordPanel(p);if(tab==="password")tab="groups";return groups(p,data.groups)}
+function startMaintenanceWatch(){
+  if(!me||me.role==="founder"||maintenanceWatchTimer!==null)return;
+  const check=()=>{
+    if(!me||me.role==="founder"||document.visibilityState==="hidden")return;
+    api("/api/maintenance").catch(()=>{});
+  };
+  check();
+  maintenanceWatchTimer=setInterval(check,10000);
+}
 function startPresenceWatch(){
   if(!me||presenceWatchTimer!==null)return;
   const ping=async()=>{
@@ -125,6 +172,7 @@ function startPresenceWatch(){
 function stopPresenceWatch(){
   if(presenceWatchTimer!==null){clearInterval(presenceWatchTimer);presenceWatchTimer=null}
   if(presencePanelTimer!==null){clearInterval(presencePanelTimer);presencePanelTimer=null}
+  if(maintenanceWatchTimer!==null){clearInterval(maintenanceWatchTimer);maintenanceWatchTimer=null}
 }
 document.addEventListener("visibilitychange",()=>{
   if(document.visibilityState==="visible"&&me)api("/api/presence/ping","POST",{}).catch(()=>{});
