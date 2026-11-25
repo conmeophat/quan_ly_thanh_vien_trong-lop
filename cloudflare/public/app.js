@@ -63,6 +63,7 @@ async function dashboard(){
       '<div class="chess-shell"><aside class="chess-sidebar" aria-label="Điều hướng chính"><div class="sidebar-brand"><span class="sidebar-orb">ĐT</span><div><strong>TRUNG TÂM LỚP HỌC</strong><small>Khu vực quản lý</small></div></div><div class="sidebar-section-label">KHÔNG GIAN LỚP</div><nav class="side-nav">'+
       navButton("groups","▦","Tổng quan","Các tổ và điểm số")+
       (canManage?navButton("accounts","♙","Tài khoản","Duyệt và quản lý",isFounder&&d.pending_members.length?String(d.pending_members.length):""):"")+
+      (canManage?navButton("assignments","♜","Phân công tổ","Tổ trưởng và thành viên"):"")+
       (isFounder?navButton("audit","◷","Nhật ký","Lịch sử hoạt động"):"")+
       '</nav>'+(canManage?'<div class="sidebar-divider"></div><div class="sidebar-section-label">BÁO CÁO</div><a class="side-link export-side-link" href="/api/export/merit.xlsx" download="diem-thi-dua-lop.xlsx" aria-label="Xuất dữ liệu điểm thi đua ra file Excel"><span class="side-icon" aria-hidden="true">⇩</span><span class="side-copy"><strong>Xuất dữ liệu Excel</strong><small>Tải báo cáo điểm của lớp</small></span><span class="side-arrow" aria-hidden="true">↓</span></a>':"")+'<div class="sidebar-divider"></div><div class="sidebar-section-label">CÀI ĐẶT</div><nav class="side-nav">'+
       navButton("password","⚙","Đổi mật khẩu","Bảo mật tài khoản")+
@@ -70,7 +71,7 @@ async function dashboard(){
       '<section class="chess-main"><div class="dashboard-head"><div class="page-intro"><p class="eyebrow">TỔNG QUAN LỚP HỌC</p><h1>Xin chào, '+esc(me.full_name)+'</h1><p class="muted">Theo dõi thành tích, điểm số và hoạt động của các tổ trong lớp.</p></div><div class="page-actions"><span class="role-pill">'+esc(roles[me.role])+'</span>'+(isFounder?'<button class="btn alt notification-btn" id="enable-notifications" type="button"><span aria-hidden="true">♧</span> Bật thông báo</button>':"")+'</div></div>'+
       '<div class="grid"><div class="stat"><span>Tổ quản lý</span><strong>'+d.groups.length+'</strong></div><div class="stat"><span>Học sinh trong danh sách</span><strong>'+count+'</strong></div><div class="stat"><span>Tổng điểm</span><strong>'+n(points)+'</strong></div><div class="stat"><span>Chờ duyệt</span><strong>'+d.pending_members.length+'</strong></div></div>'+
       (isFounder&&d.pending_members.length?'<section class="notice-card"><div class="notice-icon" aria-hidden="true">!</div><div class="notice-copy"><strong>Có '+d.pending_members.length+' đăng ký mới đang chờ duyệt</strong><p>Hãy xem thông tin và xác nhận tài khoản trước khi thành viên sử dụng hệ thống.</p></div><button class="btn" type="button" data-tab="accounts">Xem đăng ký <span aria-hidden="true">→</span></button></section>':"")+
-      '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="accounts"?"Quản lý tài khoản":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section></div>';
+      '<div class="section-toolbar"><div><p class="eyebrow">KHU VỰC LÀM VIỆC</p><h2 id="workspace-title">'+(tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp")+'</h2></div><small>Chọn chức năng ở thanh bên trái</small></div><div id="panel" class="content-panel"></div></section></div>';
     document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{
       tab=b.dataset.tab;
       document.querySelectorAll(".side-link[data-tab]").forEach(x=>{
@@ -79,7 +80,7 @@ async function dashboard(){
         if(active)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current");
       });
       const title=document.querySelector("#workspace-title");
-      if(title)title.textContent=tab==="accounts"?"Quản lý tài khoản":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
+      if(title)title.textContent=tab==="accounts"?"Quản lý tài khoản":tab==="assignments"?"Phân công tổ":tab==="audit"?"Nhật ký quản trị":tab==="password"?"Cài đặt tài khoản":"Các tổ trong lớp";
       panel();
     });
     const notifyButton=document.querySelector("#enable-notifications");
@@ -92,7 +93,7 @@ async function dashboard(){
     panel(d);
   }catch(e){app.innerHTML='<div class="card error-card">'+esc(e.message)+'</div>'}
 }
-async function panel(data){if(!data)data=await api("/api/dashboard");let p=document.querySelector("#panel");if(!p)return;if(tab==="accounts"&&["founder","teacher"].includes(me.role))return accounts(p,data.pending_members);if(tab==="audit"&&me.role==="founder")return audit(p);if(tab==="password")return passwordPanel(p);return groups(p,data.groups)}
+async function panel(data){if(!data)data=await api("/api/dashboard");let p=document.querySelector("#panel");if(!p)return;if(tab==="accounts"&&["founder","teacher"].includes(me.role))return accounts(p,data.pending_members);if(tab==="assignments"&&["founder","teacher"].includes(me.role))return assignmentsPanel(p);if(tab==="audit"&&me.role==="founder")return audit(p);if(tab==="password")return passwordPanel(p);return groups(p,data.groups)}
 function updatePendingRegistrations(items){if(me?.role!=="founder")return;const list=Array.isArray(items)?items:[];if(knownPendingIds===null){knownPendingIds=new Set(list.map(x=>Number(x.id)));return}for(const item of list){const id=Number(item.id);if(!knownPendingIds.has(id)){knownPendingIds.add(id);const message="Có đăng ký mới: "+item.full_name+" · Tổ "+item.group_no;toast(message);if("Notification" in window&&Notification.permission==="granted")new Notification("Class Merit Hub",{body:message})}}}
 function startRegistrationWatch(){if(me?.role!=="founder"||registrationWatchTimer!==null)return;registrationWatchTimer=setInterval(async()=>{try{const latest=await api("/api/dashboard");updatePendingRegistrations(latest.pending_members||[])}catch{}},30000)}
 function stopRegistrationWatch(){if(registrationWatchTimer!==null){clearInterval(registrationWatchTimer);registrationWatchTimer=null}knownPendingIds=null}
@@ -225,6 +226,89 @@ async function accounts(el,pending){
     try{const data=fd(e.target);if(data.role==="teacher")delete data.group_no;await api("/api/accounts","POST",data);toast("Đã tạo tài khoản");await dashboard()}catch(x){toast(x.message)}
   };
 }
+
+async function assignmentsPanel(el){
+  el.innerHTML='<section class="card"><p class="muted">Đang tải danh sách phân công...</p></section>';
+  try{
+    const [accountData,dashboardData]=await Promise.all([api("/api/accounts"),api("/api/dashboard")]);
+    const allAccounts=accountData.accounts||[];
+    const groups=dashboardData.groups||[];
+    const candidates=allAccounts.filter(x=>x.role==="member"&&x.is_active&&x.registration_status==="approved");
+    const leaderCards=groups.map(group=>{
+      const options=candidates.filter(x=>Number(x.group_no)===Number(group.group_no));
+      const current=group.leader?'<strong>'+esc(group.leader.full_name)+'</strong>':'<span class="muted">Chưa phân công Tổ trưởng</span>';
+      return '<section class="card assignment-card"><div class="assignment-heading"><span class="group-symbol">T'+group.group_no+'</span><div><p class="eyebrow">PHÂN CÔNG TỔ '+group.group_no+'</p><h3>Tổ '+group.group_no+'</h3></div></div><div class="assignment-current"><span>Tổ trưởng hiện tại</span>'+current+'</div><form class="form leader-assignment-form" data-group-no="'+group.group_no+'"><label class="field">Chọn thành viên bổ nhiệm<select name="member_id" required><option value="">Chọn học sinh thuộc Tổ '+group.group_no+'</option>'+options.map(x=>'<option value="'+x.id+'">'+esc(x.full_name)+'</option>').join("")+'</select></label><button class="btn" type="submit" '+(options.length?"":"disabled")+'>'+(group.leader?"Thay đổi Tổ trưởng":"Bổ nhiệm Tổ trưởng")+' <span aria-hidden="true">→</span></button><small class="muted">Tổ trưởng cũ sẽ tự động trở lại vai trò Thành viên trong tổ.</small></form></section>';
+    }).join("");
+
+    const selectable=[];
+    const seen=new Set();
+    for(const group of groups){
+      if(group.leader){
+        const key="id:"+group.leader.id;
+        if(!seen.has(key)){seen.add(key);selectable.push({id:group.leader.id,full_name:group.leader.full_name,group_no:group.group_no,status_label:"Tổ trưởng"})}
+      }
+      for(const person of (group.members||[])){
+        const key=person.id?"id:"+person.id:"name:"+person.full_name;
+        if(!seen.has(key)){
+          seen.add(key);
+          selectable.push({...person,group_no:group.group_no});
+        }
+      }
+    }
+    selectable.sort((a,b)=>Number(a.group_no)-Number(b.group_no)||a.full_name.localeCompare(b.full_name,"vi"));
+    const transferOptions=selectable.map(person=>{
+      const value=person.id?"id:"+person.id:"name:"+encodeURIComponent(person.full_name);
+      const label=person.full_name+" · Tổ "+person.group_no+(person.status_label?" · "+person.status_label:"");
+      return '<option value="'+esc(value)+'">'+esc(label)+'</option>';
+    }).join("");
+
+    el.innerHTML=
+      '<div class="assignment-intro"><strong>Quản lý cơ cấu 4 tổ</strong><p>Chỉ Người sáng lập và Giáo viên chủ nhiệm mới có quyền điều chỉnh. Thao tác phân công và chuyển tổ được ghi vào nhật ký quản trị.</p></div>'+
+      '<div class="assignment-grid">'+leaderCards+'</div>'+
+      '<section class="card assignment-transfer-card"><div class="section-title"><div><p class="eyebrow">ĐIỀU CHUYỂN HỌC SINH</p><h2>Chuyển thành viên sang tổ khác</h2><p class="muted">Có thể chuyển cả học sinh chưa kích hoạt tài khoản trong danh sách lớp.</p></div></div>'+
+      '<form id="transfer-member-form" class="transfer-form"><label class="field">Học sinh<select name="student" required><option value="">Chọn học sinh cần chuyển</option>'+transferOptions+'</select></label><label class="field">Tổ mới<select name="to_group" required><option value="">Chọn tổ đích</option><option value="1">Tổ 1</option><option value="2">Tổ 2</option><option value="3">Tổ 3</option><option value="4">Tổ 4</option></select></label><button class="btn" type="submit" '+(selectable.length?"":"disabled")+'><span aria-hidden="true">⇄</span> Chuyển tổ</button></form></section>';
+
+    el.querySelectorAll(".leader-assignment-form").forEach(form=>form.onsubmit=async event=>{
+      event.preventDefault();
+      const groupNo=Number(form.dataset.groupNo);
+      const memberId=Number(new FormData(form).get("member_id"));
+      const selected=form.querySelector("select option:checked")?.textContent||"học sinh này";
+      if(!confirm('Bổ nhiệm "'+selected+'" làm Tổ trưởng Tổ '+groupNo+'? Tổ trưởng hiện tại sẽ trở lại vai trò Thành viên.'))return;
+      try{
+        await api("/api/class/assign-leader","POST",{group_no:groupNo,member_id:memberId});
+        toast("Đã cập nhật Tổ trưởng Tổ "+groupNo+".");
+        await dashboard();
+      }catch(error){toast(error.message)}
+    });
+    const transferForm=el.querySelector("#transfer-member-form");
+    if(transferForm)transferForm.onsubmit=async event=>{
+      event.preventDefault();
+      const values=fd(transferForm);
+      const target=Number(values.to_group);
+      const selection=String(values.student||"");
+      if(!selection)return;
+      const payload={to_group:target};
+      let displayName="";
+      if(selection.startsWith("id:")){
+        const id=Number(selection.slice(3));
+        payload.member_id=id;
+        displayName=selectable.find(x=>Number(x.id)===id)?.full_name||"học sinh";
+      }else if(selection.startsWith("name:")){
+        displayName=decodeURIComponent(selection.slice(5));
+        payload.full_name=displayName;
+      }else return;
+      if(!confirm('Chuyển "'+displayName+'" sang Tổ '+target+'? Điểm số và nhận xét đã ghi sẽ được giữ nguyên.'))return;
+      try{
+        const result=await api("/api/class/transfer-member","POST",payload);
+        toast(result.message||"Đã chuyển tổ.");
+        await dashboard();
+      }catch(error){toast(error.message)}
+    };
+  }catch(error){
+    el.innerHTML='<section class="card error-card">'+esc(error.message)+'</section>';
+  }
+}
+
 async function audit(el){
 try{
 let d=await api("/api/audit");
