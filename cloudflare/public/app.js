@@ -292,7 +292,58 @@ async function accounts(el,pending){
     return '<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · '+esc(x.role_label||roles[x.role]||x.role)+' · '+esc(group)+' · '+esc(status)+'</small></div>'+actions+'</div>';
   }).join(""):'<div class="empty">Chưa có tài khoản.</div>';
   const bulkProvisionCard=me.role==="founder"?'<section class="card bulk-provision-card"><p class="eyebrow">KHỞI TẠO TÀI KHOẢN</p><h2>Tạo tài khoản cho học sinh lớp 12A1</h2><p class="muted">Tự động tạo tên đăng nhập riêng và mật khẩu ngẫu nhiên cho danh sách 47 học sinh theo đúng tổ. Tài khoản mới được kích hoạt ngay. Mật khẩu chỉ xuất hiện một lần trong file tải xuống; hệ thống chỉ lưu bản băm mật khẩu.</p><button class="btn" id="bulk-create-roster" type="button">Tạo 47 tài khoản và tải file thông tin đăng nhập <span aria-hidden="true">↓</span></button></section>':"";
-  el.innerHTML=bulkProvisionCard+'<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ. Mật khẩu gốc không thể xem lại; Người sáng lập có thể cấp mật khẩu tạm mới cho thành viên đã được duyệt.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
+  const resettableAccounts=accountRows.filter(x=>(x.role==="member"||x.role==="leader")&&x.is_active&&x.registration_status==="approved");
+  const bulkCredentialResetCard=me.role==="founder"?
+    '<section class="card bulk-credential-reset-card"><div class="section-title"><div><p class="eyebrow">DỰ PHÒNG TÀI KHOẢN</p><h2>Sao lưu thông tin đăng nhập toàn lớp</h2><p class="muted">Cấp mật khẩu tạm mới và tải danh sách đăng nhập dưới dạng Excel.</p></div><span class="section-count">'+resettableAccounts.length+' tài khoản</span></div>'+
+    '<div class="credential-reset-warning"><strong>Thao tác này sẽ thay đổi mật khẩu của toàn bộ '+resettableAccounts.length+' học sinh đang hoạt động</strong><p>Bao gồm Thành viên và Tổ trưởng đã được duyệt. Mật khẩu cũ mất hiệu lực và mọi phiên đăng nhập hiện tại của các tài khoản này sẽ bị thu hồi. Người sáng lập và Giáo viên chủ nhiệm không bị ảnh hưởng.</p></div>'+
+    '<p class="muted">File Excel chỉ được tạo và tải xuống sau khi xác nhận. Hệ thống không lưu mật khẩu tạm ở dạng văn bản. Hãy cất giữ file ở nơi an toàn và chỉ gửi mật khẩu cho đúng thành viên.</p>'+
+    '<button class="btn" id="reset-all-student-passwords" type="button" '+(resettableAccounts.length?"":"disabled")+'>Cấp lại mật khẩu và xuất file Excel <span aria-hidden="true">↓</span></button></section>':"";
+  el.innerHTML=bulkProvisionCard+bulkCredentialResetCard+'<section class="card"><h2>Đăng ký chờ duyệt</h2>'+(pending.length?pending.map(x=>'<div class="pending"><div><b>'+esc(x.full_name)+'</b><small> · '+esc(x.phone)+' · Tổ '+x.group_no+'</small></div><div class="actions"><button class="btn" data-approve="'+x.id+'">Duyệt</button><button class="btn red" data-reject="'+x.id+'">Từ chối</button></div></div>').join(""):'<div class="empty">Không có đăng ký chờ duyệt.</div>')+'</section><section class="card"><h2>Danh sách tài khoản</h2><p class="muted">Tài khoản đã xóa không thể đăng nhập; lịch sử điểm và nhận xét vẫn được giữ. Mật khẩu gốc không thể xem lại; Người sáng lập có thể cấp mật khẩu tạm mới cho thành viên đã được duyệt.</p>'+accountsHtml+'</section><section class="card"><h2>Tạo tài khoản</h2><form id="create" class="form">'+field("Họ và tên","full_name")+field("Số điện thoại","phone","tel")+field("Mật khẩu","password","password")+'<label class="field">Vai trò<select name="role" id="create-role"><option value="member">Thành viên</option><option value="leader">Tổ trưởng</option>'+(canCreateTeacher?'<option value="teacher">Giáo viên chủ nhiệm</option>':"")+'</select></label><div id="group-field">'+groupsel()+'</div><p id="teacher-role-note" class="muted" hidden>Giáo viên chủ nhiệm quản lý toàn bộ lớp và không thuộc Tổ 1, 2, 3 hoặc 4.</p><button class="btn">Tạo tài khoản</button></form></section>';
+  const resetAllButton=el.querySelector("#reset-all-student-passwords");
+  if(resetAllButton)resetAllButton.onclick=async()=>{
+    const count=resettableAccounts.length;
+    if(!count){toast("Không có tài khoản học sinh đang hoạt động để cấp lại mật khẩu.");return}
+    if(!confirm("Bạn sắp cấp mật khẩu tạm mới cho "+count+" tài khoản học sinh (Thành viên và Tổ trưởng). Mật khẩu hiện tại sẽ mất hiệu lực và các tài khoản sẽ bị đăng xuất. Bạn có chắc chắn muốn tiếp tục?"))return;
+    const confirmation=window.prompt('Để xác nhận, hãy nhập chính xác: CAP LAI MAT KHAU TOAN LOP');
+    if(confirmation!=="CAP LAI MAT KHAU TOAN LOP"){
+      if(confirmation!==null)toast("Nội dung xác nhận không chính xác. Chưa có mật khẩu nào bị thay đổi.");
+      return;
+    }
+    resetAllButton.disabled=true;
+    resetAllButton.textContent="Đang cấp lại mật khẩu và tạo file Excel...";
+    try{
+      const response=await fetch("/api/accounts/reset-all-student-passwords",{
+        method:"POST",
+        credentials:"same-origin",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({confirmation:"CAP_LAI_MAT_KHAU_TOAN_LOP"})
+      });
+      if(!response.ok){
+        let message="Không thể cấp lại mật khẩu.";
+        try{const data=await response.json();message=data.error||message}catch{}
+        throw Error(message);
+      }
+      const file=await response.blob();
+      const fileUrl=URL.createObjectURL(file);
+      const link=document.createElement("a");
+      const disposition=response.headers.get("Content-Disposition")||"";
+      const filenameMatch=disposition.match(/filename="?([^";]+)"?/i);
+      link.href=fileUrl;
+      link.download=filenameMatch?filenameMatch[1]:"tai-khoan-dang-nhap-12A1.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(()=>URL.revokeObjectURL(fileUrl),1500);
+      const updatedCount=Number(response.headers.get("X-Password-Reset-Count")||count);
+      const auditWarning=response.headers.get("X-Audit-Recorded")==="false"?" Lưu ý: nhật ký quản trị chưa ghi được thao tác này.":"";
+      toast("Đã cấp mật khẩu mới cho "+updatedCount+" tài khoản và tải file Excel. Các phiên cũ đã bị thu hồi."+auditWarning);
+      await dashboard();
+    }catch(error){
+      toast(error.message);
+      resetAllButton.disabled=false;
+      resetAllButton.textContent="Cấp lại mật khẩu và xuất file Excel ↓";
+    }
+  };
   const bulkButton=el.querySelector("#bulk-create-roster");
   if(bulkButton)bulkButton.onclick=async()=>{
     if(!confirm("Tạo tài khoản đăng nhập cho toàn bộ danh sách lớp 12A1? Tài khoản đã tồn tại sẽ được giữ nguyên và không đặt lại mật khẩu."))return;
