@@ -718,7 +718,7 @@ class Default(WorkerEntrypoint):
                 raise ValueError("Vui lòng chọn tổ từ 1 đến 4.")
 
             existing_rows=await _all(database,
-                "SELECT id,full_name,phone,group_no,is_active,registration_status FROM users WHERE role='member'"
+                "SELECT id,full_name,phone,role,group_no,is_active,registration_status FROM users WHERE role IN ('member','leader')"
             )
             target_keys={_name_key(name) for name in CLASS_ROSTER[group_no]}
             existing_by_name={}
@@ -742,11 +742,15 @@ class Default(WorkerEntrypoint):
                 assigned_group=int(assignment["group_no"]) if assignment else group_no
                 existing=existing_by_name.get(key)
                 if existing:
-                    if int(existing["group_no"]) != assigned_group:
+                    if existing["role"]=="leader":
+                        assigned_group=int(existing["group_no"])
+                    elif int(existing["group_no"]) != assigned_group:
                         await _run(database,"UPDATE users SET group_no=? WHERE id=?",assigned_group,int(existing["id"]))
                         await _audit(database,int(actor["id"]),"roster_group_corrected",int(existing["id"]),
-                            official_name+" | chuyển về Tổ "+str(group_no))
-                    if not existing["is_active"]:
+                            official_name+" | chuyển về Tổ "+str(assigned_group))
+                    if existing["role"]=="leader":
+                        status="Đang giữ vai trò Tổ trưởng Tổ "+str(existing["group_no"])+" — giữ nguyên tài khoản"
+                    elif not existing["is_active"]:
                         status="Tài khoản đã khóa — không cấp lại tự động"
                     elif existing["registration_status"]=="pending":
                         status="Đã có tài khoản chờ duyệt — giữ nguyên mật khẩu"
@@ -789,7 +793,7 @@ class Default(WorkerEntrypoint):
                     await _audit(database,int(actor["id"]),"bulk_create_student_account",created_id,
                         "Tổ "+str(item["group_no"])+" | "+item["full_name"]+" | "+item["username"])
                     entries.append({
-                        "group_no":group_no,"stt":item["stt"],"full_name":item["full_name"],
+                        "group_no":item["group_no"],"stt":item["stt"],"full_name":item["full_name"],
                         "username":item["username"],"password":item["password"],"status":"Tài khoản mới — đã kích hoạt"
                     })
                     created_count+=1
