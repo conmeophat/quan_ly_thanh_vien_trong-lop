@@ -1067,6 +1067,89 @@ class Default(WorkerEntrypoint):
                 return _response({"error":"Phương thức không được hỗ trợ."},405)
             return await self._export_merit_excel(actor)
 
+        if path=="/api/accounts/reset-all-student-passwords" and method=="POST":
+            if actor["role"] != "founder":
+                return _response({"error":"Chỉ Người sáng lập được cấp lại mật khẩu toàn lớp."},403)
+            body=await self._json_body(request)
+            if body.get("confirmation") != "CAP_LAI_MAT_KHAU_TOAN_LOP":
+                return _response({"error":"Xác nhận cấp lại mật khẩu không hợp lệ."},400)
+
+            # Chỉ đổi mật khẩu cho học sinh (Thành viên/Tổ trưởng) đang hoạt động và đã được duyệt.
+            rows=await _all(database,
+                "SELECT id,full_name,phone,role,group_no FROM users "
+                "WHERE role IN ('member','leader') AND is_active=1 AND registration_status='approved' "
+                "ORDER BY group_no,CASE role WHEN 'leader' THEN 0 ELSE 1 END,full_name COLLATE NOCASE"
+            )
+            if not rows:
+                raise ValueError("Không có tài khoản học sinh đang hoạt động để cấp lại mật khẩu.")
+
+            credential_rows=[]
+            for row in rows:
+                temporary_password=secrets.token_urlsafe(12)
+                password_hash=await _hash_password(temporary_password)
+                credential_rows.append({
+                    "id":int(row["id"]),
+                    "full_name":str(row["full_name"]),
+                    "username":str(row["phone"]),
+                    "role":str(row["role"]),
+                    "group_no":int(row["group_no"] or 0),
+                    "password":temporary_password,
+                    "password_hash":password_hash
+                })
+
+            # Một câu UPDATE duy nhất giúp việc thay mật khẩu diễn ra nguyên tử trong D1.
+            case_sql=" ".join(
+                "WHEN "+str(item["id"])+" THEN ?" for item in credential_rows
+            )
+            id_sql=",".join(str(item["id"]) for item in credential_rows)
+            await _run(database,
+                "UPDATE users SET password_hash=CASE id "+case_sql+
+                " ELSE password_hash END,session_version=session_version+1 "
+                "WHERE id IN ("+id_sql+") AND role IN ('member','leader') "
+                "AND is_active=1 AND registration_status='approved'",
+                *[item["password_hash"] for item in credential_rows]
+            )
+
+            # Xóa bộ đếm đăng nhập sai cũ để người dùng có thể dùng mật khẩu mới ngay.
+            placeholders=",".join("?" for _ in credential_rows)
+            await _run(database,
+                "DELETE FROM login_throttle WHERE username_key IN ("+placeholders+")",
+                *[item["username"] for item in credential_rows]
+            )
+
+            audit_recorded=True
+            try:
+                await _audit(database,int(actor["id"]),"bulk_reset_student_passwords",None,
+                    "Cấp mật khẩu tạm mới cho "+str(len(credential_rows))+" tài khoản học sinh (Thành viên/Tổ trưởng).")
+            except Exception as audit_error:
+                audit_recorded=False
+                console.error("Không ghi được nhật ký cấp lại mật khẩu toàn lớp",repr(audit_error))
+
+            workbook_rows=[[
+                "Tổ "+str(item["group_no"]),
+                ROLE_LABELS.get(item["role"],item["role"]),
+                item["full_name"],
+                item["username"],
+                item["password"]
+            ] for item in credential_rows]
+            workbook=_build_xlsx([(
+                "Thông tin đăng nhập",
+                ["Tổ","Vai trò","Họ và tên","Tên đăng nhập","Mật khẩu tạm mới"],
+                workbook_rows,
+                [10,24,28,25,28]
+            )])
+            timestamp=time.strftime("%Y%m%d-%H%M%S",time.gmtime())
+            headers=Headers.new()
+            headers.set("Content-Type","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            headers.set("Content-Disposition",'attachment; filename="tai-khoan-dang-nhap-12A1-'+timestamp+'.xlsx"')
+            headers.set("Cache-Control","no-store")
+            headers.set("Pragma","no-cache")
+            headers.set("X-Content-Type-Options","nosniff")
+            headers.set("Referrer-Policy","same-origin")
+            headers.set("X-Password-Reset-Count",str(len(credential_rows)))
+            headers.set("X-Audit-Recorded","true" if audit_recorded else "false")
+            return JSResponse.new(_u8(workbook),_obj(status=200,headers=headers))
+
         if path=="/api/accounts" and method=="GET":
             if actor["role"]=="member":
                 return _response({"accounts":[_public_user(actor)]})
