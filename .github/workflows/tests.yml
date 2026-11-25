@@ -31,7 +31,7 @@ jobs:
           connection = sqlite3.connect(":memory:")
           for migration in sorted(pathlib.Path("cloudflare/migrations").glob("*.sql")):
               connection.executescript(migration.read_text(encoding="utf-8"))
-          expected = {"users", "score_entries", "evaluations", "login_throttle", "audit_logs", "roster_assignments", "daily_scores", "online_presence", "credential_vault", "device_bindings", "site_settings"}
+          expected = {"users", "score_entries", "evaluations", "login_throttle", "audit_logs", "roster_assignments", "daily_scores", "online_presence", "credential_vault", "device_bindings", "site_settings", "leader_notification_permissions"}
           actual = {
               row[0]
               for row in connection.execute(
@@ -62,7 +62,28 @@ jobs:
                   pass
               else:
                   raise AssertionError("Device binding uniqueness constraint did not reject a duplicate")
-          print("D1 schema and one-account/one-device constraints OK:", ", ".join(sorted(expected)))
+          leader_ids = []
+          for group_no in (1, 2):
+              cursor = connection.execute(
+                  "INSERT INTO users(full_name,phone,password_hash,role,group_no) VALUES(?,?,?,?,?)",
+                  (f"Leader {group_no}", f"09100000{group_no:02d}", "hash", "leader", group_no),
+              )
+              leader_ids.append(cursor.lastrowid)
+          connection.execute(
+              "INSERT INTO leader_notification_permissions(user_id,device_hash) VALUES(?,?)",
+              (leader_ids[0], "leader-device-a"),
+          )
+          for user_id, device_hash in ((leader_ids[0], "leader-device-b"), (leader_ids[1], "leader-device-a")):
+              try:
+                  connection.execute(
+                      "INSERT INTO leader_notification_permissions(user_id,device_hash) VALUES(?,?)",
+                      (user_id, device_hash),
+                  )
+              except sqlite3.IntegrityError:
+                  pass
+              else:
+                  raise AssertionError("Leader notification consent must be unique per account and device")
+          print("D1 schema and account/device permission constraints OK:", ", ".join(sorted(expected)))
           PY
       - name: Validate shell deployment scripts
         run: find deploy/oracle -name '*.sh' -print0 | xargs -0 -n1 bash -n
