@@ -9,7 +9,9 @@ from pyodide.ffi import to_js
 from workers import WorkerEntrypoint
 
 SESSION_COOKIE = "cmh_session"
+DEVICE_COOKIE = "cmh_device"
 SESSION_TTL = 28800
+DEVICE_TTL = 31536000
 # Cloudflare Workers Web Crypto currently rejects PBKDF2 iteration counts above 100,000.
 PBKDF2_ITERATIONS = 100000
 ROLE_LABELS = {"founder":"Người sáng lập","teacher":"Giáo viên chủ nhiệm","leader":"Tổ trưởng","member":"Thành viên"}
@@ -41,14 +43,16 @@ def _b64(raw):
 def _unb64(value):
     return base64.urlsafe_b64decode(value + ("=" * (-len(value) % 4)))
 
-def _response(data, status=200, cookie=None):
+def _response(data, status=200, cookie=None, device_cookie=None):
     headers = Headers.new()
     headers.set("Content-Type", "application/json; charset=utf-8")
     headers.set("Cache-Control", "no-store")
     headers.set("X-Content-Type-Options", "nosniff")
     headers.set("Referrer-Policy", "same-origin")
     if cookie:
-        headers.set("Set-Cookie", cookie)
+        headers.append("Set-Cookie", cookie)
+    if device_cookie:
+        headers.append("Set-Cookie", device_cookie)
     return JSResponse.new(json.dumps(data, ensure_ascii=False), _obj(status=status, headers=headers))
 
 def _cookie_value(request, name):
@@ -162,6 +166,21 @@ async def _ensure_online_presence(database):
 
 
 
+
+
+async def _ensure_device_bindings(database):
+    try:
+        await _first(database, "SELECT user_id FROM device_bindings LIMIT 1")
+    except Exception:
+        await _run(database,
+            "CREATE TABLE IF NOT EXISTS device_bindings ("
+            "user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,"
+            "device_hash TEXT NOT NULL UNIQUE,"
+            "bound_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+
+
 async def _ensure_credential_vault(database):
     try:
         await _first(database, "SELECT user_id FROM credential_vault LIMIT 1")
@@ -203,6 +222,10 @@ async def _sign(payload, secret):
 async def _verify_signature(payload, signature, secret):
     key = await crypto.subtle.importKey("raw", _u8(secret.encode("utf-8")), _obj(name="HMAC", hash="SHA-256"), False, to_js(["verify"]))
     return bool(await crypto.subtle.verify("HMAC", key, _u8(signature), _u8(payload)))
+
+
+async def _device_fingerprint(token,secret):
+    return _b64(await _sign(b"Class Merit Hub device binding v1:" + token.encode("utf-8"),secret))
 
 
 def _credential_vault_secret(env):
@@ -420,6 +443,9 @@ class Default(WorkerEntrypoint):
             return SESSION_COOKIE+"="+token+"; Path=/; Max-Age="+str(SESSION_TTL)+"; HttpOnly; Secure; SameSite=Lax"
         return SESSION_COOKIE+"=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"
 
+    def _device_cookie(self, token):
+        return DEVICE_COOKIE+"="+token+"; Path=/; Max-Age="+str(DEVICE_TTL)+"; HttpOnly; Secure; SameSite=Lax"
+
     async def _new_session(self,user):
         secret=getattr(self.env,"SESSION_SECRET","") or ""
         if len(secret)<32:
@@ -444,6 +470,17 @@ class Default(WorkerEntrypoint):
             user=await _first(database,"SELECT id,full_name,phone,password_hash,role,group_no,is_active,registration_status,session_version,created_at FROM users WHERE id=?",int(session["uid"]))
             if not user or not user["is_active"] or user["registration_status"]!="approved" or int(user["session_version"])!=int(session["sv"]):
                 return None
+            if user["role"] in ("member","leader"):
+                device_token=_cookie_value(request,DEVICE_COOKIE)
+                if not device_token or not re.fullmatch(r"[A-Za-z0-9_-]{40,80}",device_token):
+                    return None
+                await _ensure_device_bindings(database)
+                device_hash=await _device_fingerprint(device_token,secret)
+                bound=await _first(database,"SELECT device_hash FROM device_bindings WHERE user_id=?",int(user["id"]))
+                owner=await _first(database,"SELECT user_id FROM device_bindings WHERE device_hash=?",device_hash)
+                if (not bound or not hmac.compare_digest(str(bound["device_hash"]),device_hash)
+                        or not owner or int(owner["user_id"])!=int(user["id"])):
+                    return None
             return user
         except Exception:
             return None
@@ -771,6 +808,12 @@ class Default(WorkerEntrypoint):
         if method in ("POST","PUT","DELETE"):
             self._check_origin(request)
 
+        if path=="/api/device/init" and method=="POST":
+            device_token=_cookie_value(request,DEVICE_COOKIE)
+            if not device_token or not re.fullmatch(r"[A-Za-z0-9_-]{40,80}",device_token):
+                device_token=secrets.token_urlsafe(32)
+            return _response({"ok":True},200,device_cookie=self._device_cookie(device_token))
+
         if path=="/api/bootstrap" and method=="POST":
             body=await self._json_body(request)
             expected=getattr(self.env,"FOUNDER_SETUP_TOKEN","") or ""
@@ -827,6 +870,33 @@ class Default(WorkerEntrypoint):
                 locked=now+900 if count>=5 else 0
                 await _run(database,"INSERT INTO login_throttle(username_key,failed_count,locked_until,updated_at) VALUES(?,?,?,?) ON CONFLICT(username_key) DO UPDATE SET failed_count=excluded.failed_count,locked_until=excluded.locked_until,updated_at=excluded.updated_at",phone,count,locked,now)
                 return _response({"error":"Thông tin đăng nhập không đúng hoặc tài khoản chưa được duyệt."},401)
+            if user["role"] in ("member","leader"):
+                await _ensure_device_bindings(database)
+                device_token=_cookie_value(request,DEVICE_COOKIE)
+                if not device_token or not re.fullmatch(r"[A-Za-z0-9_-]{40,80}",device_token):
+                    return _response({"error":"Thiết bị chưa được khởi tạo. Hãy tải lại trang đăng nhập và thử lại."},428)
+                device_hash=await _device_fingerprint(device_token,getattr(self.env,"SESSION_SECRET","") or "")
+                user_binding=await _first(database,"SELECT device_hash FROM device_bindings WHERE user_id=?",int(user["id"]))
+                device_owner=await _first(database,"SELECT user_id FROM device_bindings WHERE device_hash=?",device_hash)
+                if user_binding and not hmac.compare_digest(str(user_binding["device_hash"]),device_hash):
+                    return _response({"error":"Tài khoản này đã được liên kết với một thiết bị khác. Hãy liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm để đặt lại thiết bị."},403)
+                if device_owner and int(device_owner["user_id"])!=int(user["id"]):
+                    return _response({"error":"Thiết bị này đã được liên kết với tài khoản học sinh khác. Mỗi thiết bị chỉ được dùng một tài khoản học sinh/Tổ trưởng."},403)
+                if not user_binding and not device_owner:
+                    try:
+                        await _run(database,
+                            "INSERT INTO device_bindings(user_id,device_hash) VALUES(?,?)",
+                            int(user["id"]),device_hash
+                        )
+                    except Exception:
+                        # Xử lý hai yêu cầu đăng nhập đồng thời trên cùng thiết bị/tài khoản.
+                        user_binding=await _first(database,"SELECT device_hash FROM device_bindings WHERE user_id=?",int(user["id"]))
+                        device_owner=await _first(database,"SELECT user_id FROM device_bindings WHERE device_hash=?",device_hash)
+                        if (not user_binding or not hmac.compare_digest(str(user_binding["device_hash"]),device_hash)
+                                or not device_owner or int(device_owner["user_id"])!=int(user["id"])):
+                            return _response({"error":"Thiết bị hoặc tài khoản vừa được liên kết với một tài khoản khác. Hãy thử lại hoặc liên hệ quản trị viên."},409)
+                elif not user_binding or not device_owner or int(device_owner["user_id"])!=int(user["id"]):
+                    return _response({"error":"Thông tin liên kết thiết bị không khớp. Hãy liên hệ quản trị viên."},403)
             await _run(database,"DELETE FROM login_throttle WHERE username_key=?",phone)
             return _response({"ok":True,"user":_public_user(user)},200,self._cookie(await self._new_session(user)))
 
@@ -1344,6 +1414,7 @@ class Default(WorkerEntrypoint):
                 if not target["is_active"]:
                     raise ValueError("Tài khoản này đã được xóa trước đó.")
                 await _run(database,"UPDATE users SET is_active=0,session_version=session_version+1,registration_status=CASE WHEN registration_status='pending' THEN 'rejected' ELSE registration_status END WHERE id=?",target_id)
+                await _run(database,"DELETE FROM device_bindings WHERE user_id=?",target_id)
                 await _audit(database,int(actor["id"]),"delete_account",target_id,target["full_name"]+" | "+ROLE_LABELS.get(target["role"],target["role"]))
                 return _response({"ok":True,"message":"Tài khoản đã bị vô hiệu hóa; dữ liệu thi đua được giữ lại."})
             if len(parts)==4:
@@ -1353,6 +1424,16 @@ class Default(WorkerEntrypoint):
                 if not target:
                     raise ValueError("Không tìm thấy tài khoản.")
                 body=await self._json_body(request)
+                if action=="reset-device":
+                    if actor["role"] not in ("founder","teacher"):
+                        return _response({"error":"Chỉ Người sáng lập và Giáo viên chủ nhiệm được đặt lại thiết bị."},403)
+                    if target["role"] not in ("member","leader") or not target["is_active"]:
+                        return _response({"error":"Chỉ có thể đặt lại thiết bị cho Thành viên/Tổ trưởng đang hoạt động."},400)
+                    await _ensure_device_bindings(database)
+                    await _run(database,"DELETE FROM device_bindings WHERE user_id=?",target_id)
+                    await _audit(database,int(actor["id"]),"reset_account_device",target_id,
+                        target["full_name"]+" | xóa liên kết thiết bị cũ; thiết bị tiếp theo sẽ được khóa vào tài khoản này")
+                    return _response({"ok":True,"message":"Đã đặt lại liên kết thiết bị. Thành viên cần đăng nhập lại trên thiết bị mới."})
                 if action in ("approve","reject"):
                     if actor["role"] not in ("founder","teacher"):
                         return _response({"error":"Bạn không có quyền duyệt tài khoản."},403)
@@ -1381,8 +1462,8 @@ class Default(WorkerEntrypoint):
                     if generated_password:
                         if actor["role"] != "founder":
                             return _response({"error":"Chỉ Người sáng lập được cấp mật khẩu tạm tự động."},403)
-                        if target["role"] != "member" or not target["is_active"] or target["registration_status"] != "approved":
-                            return _response({"error":"Chỉ có thể cấp mật khẩu tạm cho thành viên đã được duyệt và đang hoạt động."},400)
+                        if target["role"] not in ("member","leader") or not target["is_active"] or target["registration_status"] != "approved":
+                            return _response({"error":"Chỉ có thể cấp mật khẩu tạm cho Thành viên/Tổ trưởng đã được duyệt và đang hoạt động."},400)
                         new_password = secrets.token_urlsafe(12)
                     else:
                         new_password = str(body.get("new_password") or "")
@@ -1403,18 +1484,26 @@ class Default(WorkerEntrypoint):
                     if actor["role"]!="founder" or target["role"]=="founder":
                         return _response({"error":"Chỉ Người sáng lập được khóa tài khoản khác."},403)
                     await _run(database,"UPDATE users SET is_active=0,session_version=session_version+1 WHERE id=?",target_id)
+                    await _run(database,"DELETE FROM device_bindings WHERE user_id=?",target_id)
                     await _audit(database,int(actor["id"]),"deactivate_account",target_id)
                     return _response({"ok":True})
 
         if path=="/api/password/change" and method=="POST":
-            if actor["role"] not in ("founder","teacher"):
+            if actor["role"] not in ("founder","teacher","leader","member"):
                 return _response({"error":"Vai trò này không được phép đổi mật khẩu."},403)
             body=await self._json_body(request)
             if not await _verify_password(str(body.get("old_password") or ""),actor["password_hash"]):
                 return _response({"error":"Mật khẩu hiện tại không đúng."},400)
-            new_hash=await _hash_password(str(body.get("new_password") or ""))
+            new_password=str(body.get("new_password") or "")
+            new_hash=await _hash_password(new_password)
             await _run(database,"UPDATE users SET password_hash=?,session_version=session_version+1 WHERE id=?",new_hash,int(actor["id"]))
-            await _audit(database,int(actor["id"]),"change_password",int(actor["id"]))
+            if actor["role"] in ("member","leader"):
+                await _ensure_credential_vault(database)
+                await _store_credential(
+                    database,int(actor["id"]),new_password,new_hash,_credential_vault_secret(self.env)
+                )
+            await _audit(database,int(actor["id"]),"change_password",int(actor["id"]),
+                "Người dùng tự đổi mật khẩu; kho thông tin đăng nhập mã hóa đã được cập nhật.")
             return _response({"ok":True},200,self._cookie())
 
         if path.startswith("/api/members/"):
