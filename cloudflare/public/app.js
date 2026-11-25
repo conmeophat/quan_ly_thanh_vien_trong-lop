@@ -122,7 +122,7 @@ async function weeklyPanel(el){
         const rows=group.members.map(member=>{
           const cells=data.dates.map((day,index)=>{
             const value=member.days[day];
-            return '<td><input class="week-point-input" type="number" inputmode="decimal" min="-100" max="100" step="0.5" data-member-id="'+member.id+'" data-score-date="'+day+'" value="'+(value===null?"":String(value))+'" aria-label="Điểm '+weekdays[index]+' của '+esc(member.full_name)+'" placeholder="—"></td>';
+            return '<td><input class="week-point-input" type="number" inputmode="decimal" min="-100" max="100" step="0.5" data-member-id="'+member.id+'" data-score-date="'+day+'" data-original="'+(value===null?"":String(value))+'" value="'+(value===null?"":String(value))+'" aria-label="Điểm '+weekdays[index]+' của '+esc(member.full_name)+'" placeholder="—"></td>';
           }).join("");
           return '<tr data-week-row><td class="week-member-cell"><strong>'+esc(member.full_name)+'</strong><small>Đã nhập '+member.filled_days+'/7 ngày</small></td>'+cells+'<td class="week-total-cell" data-week-total>'+n(member.week_total)+'</td></tr>';
         }).join("");
@@ -146,7 +146,9 @@ async function weeklyPanel(el){
         const inputs=[...el.querySelectorAll(".week-point-input")];
         const invalid=inputs.find(input=>!input.checkValidity());
         if(invalid){invalid.reportValidity();invalid.focus();return}
-        const scores=inputs.map(input=>({
+        const changedInputs=inputs.filter(input=>input.value.trim()!==input.dataset.original);
+        if(!changedInputs.length){toast("Không có ô điểm nào thay đổi.");return}
+        const scores=changedInputs.map(input=>({
           member_id:Number(input.dataset.memberId),
           date:input.dataset.scoreDate,
           points:input.value.trim()===""?null:Number(input.value)
