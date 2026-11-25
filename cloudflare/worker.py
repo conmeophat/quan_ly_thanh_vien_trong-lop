@@ -1188,50 +1188,65 @@ class Default(WorkerEntrypoint):
                 raise ValueError("Không có tài khoản học sinh đang hoạt động để cấp lại mật khẩu.")
 
             credential_rows=[]
+            password_reset_count=0
             for row in rows:
-                temporary_password=secrets.token_urlsafe(12)
-                password_hash=await _hash_password(temporary_password)
+                user_id=int(row["id"])
+                current_hash=str(row["password_hash"])
+                temporary_password=await _load_credential(
+                    database,user_id,current_hash,vault_secret
+                )
+                password_hash=current_hash
+                needs_reset=temporary_password is None
+                if needs_reset:
+                    # Bản băm cũ không thể đảo ngược. Chỉ cấp mật khẩu mới cho tài khoản
+                    # chưa có bản sao hợp lệ hoặc bản sao không còn khớp mật khẩu hiện tại.
+                    temporary_password=secrets.token_urlsafe(12)
+                    password_hash=await _hash_password(temporary_password)
+                    await _store_credential(
+                        database,user_id,temporary_password,password_hash,vault_secret
+                    )
+                    password_reset_count+=1
                 credential_rows.append({
-                    "id":int(row["id"]),
+                    "id":user_id,
                     "full_name":str(row["full_name"]),
                     "username":str(row["phone"]),
                     "role":str(row["role"]),
                     "group_no":int(row["group_no"] or 0),
                     "password":temporary_password,
-                    "password_hash":password_hash
+                    "password_hash":password_hash,
+                    "needs_reset":needs_reset
                 })
 
-            # Một câu UPDATE duy nhất giúp việc thay mật khẩu diễn ra nguyên tử trong D1.
-            case_sql=" ".join(
-                "WHEN "+str(item["id"])+" THEN ?" for item in credential_rows
-            )
-            id_sql=",".join(str(item["id"]) for item in credential_rows)
-            await _run(database,
-                "UPDATE users SET password_hash=CASE id "+case_sql+
-                " ELSE password_hash END,session_version=session_version+1 "
-                "WHERE id IN ("+id_sql+") AND role IN ('member','leader') "
-                "AND is_active=1 AND registration_status='approved'",
-                *[item["password_hash"] for item in credential_rows]
-            )
-            for item in credential_rows:
-                await _store_credential(
-                    database,item["id"],item["password"],item["password_hash"],vault_secret
+            # Chỉ cập nhật những tài khoản thực sự cần cấp mật khẩu lần đầu; những
+            # tài khoản đã có bản sao hợp lệ giữ nguyên mật khẩu và phiên đăng nhập.
+            reset_rows=[item for item in credential_rows if item["needs_reset"]]
+            if reset_rows:
+                case_sql=" ".join(
+                    "WHEN "+str(item["id"])+" THEN ?" for item in reset_rows
                 )
-
-            # Xóa bộ đếm đăng nhập sai cũ để người dùng có thể dùng mật khẩu mới ngay.
-            placeholders=",".join("?" for _ in credential_rows)
-            await _run(database,
-                "DELETE FROM login_throttle WHERE username_key IN ("+placeholders+")",
-                *[item["username"] for item in credential_rows]
-            )
+                id_sql=",".join(str(item["id"]) for item in reset_rows)
+                await _run(database,
+                    "UPDATE users SET password_hash=CASE id "+case_sql+
+                    " ELSE password_hash END,session_version=session_version+1 "
+                    "WHERE id IN ("+id_sql+") AND role IN ('member','leader') "
+                    "AND is_active=1 AND registration_status='approved'",
+                    *[item["password_hash"] for item in reset_rows]
+                )
+                placeholders=",".join("?" for _ in reset_rows)
+                await _run(database,
+                    "DELETE FROM login_throttle WHERE username_key IN ("+placeholders+")",
+                    *[item["username"] for item in reset_rows]
+                )
 
             audit_recorded=True
             try:
-                await _audit(database,int(actor["id"]),"bulk_reset_student_passwords",None,
-                    "Cấp mật khẩu tạm mới cho "+str(len(credential_rows))+" tài khoản học sinh (Thành viên/Tổ trưởng).")
+                await _audit(database,int(actor["id"]),"export_student_credentials",None,
+                    "Xuất thông tin đăng nhập cho "+str(len(credential_rows))+
+                    " tài khoản; cấp mật khẩu mới lần đầu cho "+str(password_reset_count)+
+                    " tài khoản chưa có bản sao hợp lệ.")
             except Exception as audit_error:
                 audit_recorded=False
-                console.error("Không ghi được nhật ký cấp lại mật khẩu toàn lớp",repr(audit_error))
+                console.error("Không ghi được nhật ký xuất thông tin đăng nhập",repr(audit_error))
 
             workbook_rows=[[
                 "Tổ "+str(item["group_no"]),
@@ -1242,7 +1257,7 @@ class Default(WorkerEntrypoint):
             ] for item in credential_rows]
             workbook=_build_xlsx([(
                 "Thông tin đăng nhập",
-                ["Tổ","Vai trò","Họ và tên","Tên đăng nhập","Mật khẩu tạm mới"],
+                ["Tổ","Vai trò","Họ và tên","Tên đăng nhập","Mật khẩu"],
                 workbook_rows,
                 [10,24,28,25,28]
             )])
@@ -1254,7 +1269,8 @@ class Default(WorkerEntrypoint):
             headers.set("Pragma","no-cache")
             headers.set("X-Content-Type-Options","nosniff")
             headers.set("Referrer-Policy","same-origin")
-            headers.set("X-Password-Reset-Count",str(len(credential_rows)))
+            headers.set("X-Password-Reset-Count",str(password_reset_count))
+            headers.set("X-Credential-Count",str(len(credential_rows)))
             headers.set("X-Audit-Recorded","true" if audit_recorded else "false")
             return JSResponse.new(_u8(workbook),_obj(status=200,headers=headers))
 
