@@ -15,6 +15,7 @@ DEVICE_TTL = 31536000
 # Cloudflare Workers Web Crypto currently rejects PBKDF2 iteration counts above 100,000.
 PBKDF2_ITERATIONS = 100000
 ROLE_LABELS = {"founder":"Người sáng lập","teacher":"Giáo viên chủ nhiệm","leader":"Tổ trưởng","member":"Thành viên"}
+MAINTENANCE_MESSAGE = "Trang web đang được bảo trì, nâng cấp. Mong mọi người quay lại sau. Cảm ơn!"
 
 # Danh sách lớp 12A1 lấy từ file Word người dùng cung cấp.
 # Tổ 3 không có tên ở STT 7 trong tài liệu nên không tự bổ sung tên.
@@ -419,7 +420,111 @@ class Default(WorkerEntrypoint):
             except Exception as exc:
                 console.error("Class Merit Hub API error", path, repr(exc), traceback.format_exc())
                 return _response({"error":"Đã xảy ra lỗi máy chủ. Vui lòng thử lại."},500)
+        if path in ("/", "/index.html") and request.method.upper() in ("GET", "HEAD"):
+            try:
+                if await self._maintenance_enabled(self.env.DB):
+                    actor = await self._actor(request, self.env.DB)
+                    if not actor or actor["role"] != "founder":
+                        return self._maintenance_page()
+            except Exception as exc:
+                console.error("Class Merit Hub maintenance page check failed", repr(exc))
         return await self.env.ASSETS.fetch(request)
+
+    async def _maintenance_enabled(self, database):
+        try:
+            row = await _first(database, "SELECT setting_value FROM site_settings WHERE setting_key='maintenance_enabled'")
+        except Exception:
+            await _run(database,
+                "CREATE TABLE IF NOT EXISTS site_settings ("
+                "setting_key TEXT PRIMARY KEY,"
+                "setting_value TEXT NOT NULL,"
+                "updated_by INTEGER REFERENCES users(id),"
+                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+            )
+            row = await _first(database, "SELECT setting_value FROM site_settings WHERE setting_key='maintenance_enabled'")
+        return bool(row and str(row["setting_value"]).strip().lower() in ("1", "true", "yes", "on"))
+
+    def _maintenance_page(self):
+        html = """<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Website đang bảo trì</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eaf1ff;background:radial-gradient(circle at 15% 10%,#214a70 0,transparent 34%),linear-gradient(145deg,#101827,#17283d 58%,#0c1422)}
+.maintenance-card{width:min(100%,650px);padding:clamp(28px,6vw,54px);border:1px solid rgba(255,255,255,.13);border-radius:26px;background:rgba(16,29,47,.86);box-shadow:0 28px 90px rgba(0,0,0,.38);text-align:center}
+.brand-mark{width:58px;height:58px;display:grid;place-items:center;margin:0 auto 22px;border-radius:18px;background:linear-gradient(145deg,#2b78b8,#204b7d);font-size:25px;font-weight:900}
+.eyebrow{margin:0 0 13px;color:#8eb9e8;font-size:12px;font-weight:800;letter-spacing:.16em}
+h1{margin:0;font-size:clamp(26px,5vw,38px);line-height:1.2} .message{margin:18px auto 0;max-width:490px;color:#c0ccdb;font-size:16px;line-height:1.8}
+.status{display:inline-flex;align-items:center;gap:9px;margin-top:25px;padding:9px 14px;border:1px solid rgba(255,196,104,.25);border-radius:999px;background:rgba(255,196,104,.08);color:#ffd28a;font-size:13px;font-weight:700}
+.status:before{content:"";width:8px;height:8px;border-radius:50%;background:#ffc468;box-shadow:0 0 12px #ffc468}
+.divider{height:1px;margin:30px 0 22px;background:rgba(255,255,255,.1)}
+details{text-align:left;color:#b9c8da}summary{cursor:pointer;text-align:center;font-size:13px;font-weight:700;color:#a9c8eb}
+form{display:grid;gap:12px;margin-top:18px;text-align:left}label{display:grid;gap:7px;font-size:13px;color:#c5d2e2}input{width:100%;padding:13px 14px;border:1px solid rgba(255,255,255,.17);border-radius:12px;background:#0d1929;color:white;font:inherit;outline:none}input:focus{border-color:#70afe8;box-shadow:0 0 0 3px rgba(112,175,232,.15)}
+button{padding:13px 18px;border:0;border-radius:12px;background:linear-gradient(135deg,#3989ce,#25639f);color:white;font-size:14px;font-weight:800;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.hint{min-height:22px;margin:0;text-align:center;color:#f6bd89;font-size:13px;line-height:1.5}
+footer{margin-top:26px;color:#8193a9;font-size:12px}
+</style>
+</head>
+<body>
+<main class="maintenance-card">
+  <div class="brand-mark" aria-hidden="true">ĐT</div>
+  <p class="eyebrow">QUẢN LÝ ĐIỂM THI ĐUA · LỚP 12A1</p>
+  <h1>Trang web đang được bảo trì</h1>
+  <p class="message">Hệ thống đang được bảo trì và nâng cấp để hoạt động tốt hơn. Mong mọi người quay lại sau. Cảm ơn!</p>
+  <div class="status">Đang bảo trì và nâng cấp</div>
+  <div class="divider"></div>
+  <details>
+    <summary>Khu vực đăng nhập dành riêng cho Người sáng lập</summary>
+    <form id="founder-login">
+      <label>Tên đăng nhập hoặc số điện thoại<input name="phone" autocomplete="username" required></label>
+      <label>Mật khẩu<input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Đăng nhập quản trị</button>
+      <p class="hint" id="login-message" role="status"></p>
+    </form>
+  </details>
+  <footer>Xin cảm ơn mọi người đã thông cảm và chờ đợi.</footer>
+</main>
+<script>
+document.getElementById("founder-login").addEventListener("submit", async function(event){
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button");
+  const message = document.getElementById("login-message");
+  button.disabled = true;
+  message.textContent = "Đang xác thực tài khoản Người sáng lập...";
+  try {
+    const initResponse = await fetch("/api/device/init", {
+      method:"POST", credentials:"same-origin",
+      headers:{"Content-Type":"application/json"}, body:"{}"
+    });
+    if (!initResponse.ok) throw new Error("Không thể khởi tạo phiên đăng nhập. Vui lòng thử lại.");
+    const response = await fetch("/api/login", {
+      method:"POST", credentials:"same-origin",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({phone:form.elements.phone.value.trim(),password:form.elements.password.value})
+    });
+    let result = {};
+    try { result = await response.json(); } catch (_) {}
+    if (!response.ok) throw new Error(result.error || "Không thể đăng nhập.");
+    message.textContent = "Đăng nhập thành công. Đang mở khu vực quản trị...";
+    window.location.replace("/");
+  } catch (error) {
+    message.textContent = error.message || "Đăng nhập không thành công.";
+    button.disabled = false;
+  }
+});
+</script>
+</body>
+</html>"""
+        headers = Headers.new()
+        headers.set("Content-Type", "text/html; charset=utf-8")
+        headers.set("Cache-Control", "no-store, no-cache, must-revalidate")
+        headers.set("X-Content-Type-Options", "nosniff")
+        headers.set("Referrer-Policy", "same-origin")
+        headers.set("X-Robots-Tag", "noindex, nofollow")
+        return JSResponse.new(html, _obj(status=503, headers=headers))
 
     async def _json_body(self, request):
         try:
@@ -799,6 +904,12 @@ class Default(WorkerEntrypoint):
     async def _api(self,request,path):
         method=request.method.upper()
         database=self.env.DB
+        maintenance_enabled=await self._maintenance_enabled(database)
+        maintenance_actor=None
+        if maintenance_enabled and path not in ("/api/login","/api/device/init"):
+            maintenance_actor=await self._actor(request,database)
+            if not maintenance_actor or maintenance_actor["role"]!="founder":
+                return _response({"code":"SITE_MAINTENANCE","error":MAINTENANCE_MESSAGE},503)
         if path=="/api/healthz" and method=="GET":
             await _first(database,"SELECT 1 AS ok")
             return _response({"status":"ok"})
@@ -870,6 +981,8 @@ class Default(WorkerEntrypoint):
                 locked=now+900 if count>=5 else 0
                 await _run(database,"INSERT INTO login_throttle(username_key,failed_count,locked_until,updated_at) VALUES(?,?,?,?) ON CONFLICT(username_key) DO UPDATE SET failed_count=excluded.failed_count,locked_until=excluded.locked_until,updated_at=excluded.updated_at",phone,count,locked,now)
                 return _response({"error":"Thông tin đăng nhập không đúng hoặc tài khoản chưa được duyệt."},401)
+            if maintenance_enabled and user["role"]!="founder":
+                return _response({"code":"SITE_MAINTENANCE","error":MAINTENANCE_MESSAGE},503)
             if user["role"] in ("member","leader"):
                 await _ensure_device_bindings(database)
                 device_token=_cookie_value(request,DEVICE_COOKIE)
@@ -903,9 +1016,28 @@ class Default(WorkerEntrypoint):
         if path=="/api/logout" and method=="POST":
             return _response({"ok":True},200,self._cookie())
 
-        actor=await self._actor(request,database)
+        actor=maintenance_actor or await self._actor(request,database)
         if not actor:
             return _response({"error":"Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."},401)
+        if path=="/api/maintenance" and method=="GET":
+            return _response({"enabled":maintenance_enabled})
+        if path=="/api/maintenance" and method=="POST":
+            if actor["role"]!="founder":
+                return _response({"error":"Chỉ Người sáng lập được bật hoặc tắt chế độ bảo trì."},403)
+            body=await self._json_body(request)
+            enabled=body.get("enabled")
+            if not isinstance(enabled,bool):
+                raise ValueError("Trạng thái bảo trì không hợp lệ.")
+            await _run(database,
+                "INSERT INTO site_settings(setting_key,setting_value,updated_by,updated_at) VALUES('maintenance_enabled',?,?,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP",
+                "1" if enabled else "0",int(actor["id"])
+            )
+            await _audit(database,int(actor["id"]),
+                "enable_site_maintenance" if enabled else "disable_site_maintenance",
+                None, "Đã bật chế độ bảo trì website." if enabled else "Đã mở lại website sau bảo trì."
+            )
+            return _response({"ok":True,"enabled":enabled})
         if path=="/api/me" and method=="GET":
             return _response({"user":_public_user(actor)})
         if path=="/api/dashboard" and method=="GET":
