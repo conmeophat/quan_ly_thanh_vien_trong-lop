@@ -100,6 +100,20 @@ def _roster_entry(value):
                 return group_no, official_name
     return None
 
+async def _ensure_roster_assignments(database):
+    try:
+        await _first(database,"SELECT student_key FROM roster_assignments LIMIT 1")
+    except Exception:
+        await _run(database,
+            "CREATE TABLE IF NOT EXISTS roster_assignments ("
+            "student_key TEXT PRIMARY KEY,full_name TEXT NOT NULL,"
+            "group_no INTEGER NOT NULL CHECK(group_no BETWEEN 1 AND 4),"
+            "updated_by INTEGER REFERENCES users(id),"
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+        await _run(database,"CREATE INDEX IF NOT EXISTS roster_assignments_group ON roster_assignments(group_no)")
+
+
 async def _pbkdf2(password, salt):
     key = await crypto.subtle.importKey("raw", _u8(password.encode("utf-8")), _obj(name="PBKDF2"), False, to_js(["deriveBits"]))
     params = _obj(name="PBKDF2", salt=_u8(salt), iterations=PBKDF2_ITERATIONS, hash="SHA-256")
@@ -346,6 +360,7 @@ class Default(WorkerEntrypoint):
             return {"user":_public_user(actor),"personal":await self._member_records(int(actor["id"]))}
 
         groups=[int(actor["group_no"])] if actor["role"]=="leader" else [1,2,3,4]
+        await _ensure_roster_assignments(database)
         assignment_rows=await _all(database,"SELECT student_key,group_no FROM roster_assignments")
         roster_group_overrides={str(row["student_key"]):int(row["group_no"]) for row in assignment_rows}
         all_roster_keys={_name_key(name) for names in CLASS_ROSTER.values() for name in names}
@@ -533,6 +548,7 @@ class Default(WorkerEntrypoint):
             return _response({"ok":True,"user":_public_user(user)},201,self._cookie(await self._new_session(user)))
 
         if path=="/api/register" and method=="POST":
+            await _ensure_roster_assignments(database)
             body=await self._json_body(request)
             name=_clean(body.get("full_name"),"Họ và tên",2,100)
             roster_member=_roster_entry(name)
@@ -640,6 +656,7 @@ class Default(WorkerEntrypoint):
             return _response({"ok":True,"message":"Đã cập nhật Tổ trưởng Tổ "+str(group_no)+"."})
 
         if path=="/api/class/transfer-member" and method=="POST":
+            await _ensure_roster_assignments(database)
             if actor["role"] not in ("founder","teacher"):
                 return _response({"error":"Chỉ Người sáng lập và Giáo viên chủ nhiệm được chuyển thành viên giữa các tổ."},403)
             body=await self._json_body(request)
@@ -710,6 +727,7 @@ class Default(WorkerEntrypoint):
             return _response({"ok":True,"message":"Đã chuyển "+full_name+" từ Tổ "+str(current_group)+" sang Tổ "+str(target_group)+"."})
 
         if path=="/api/accounts/bulk-create-roster" and method=="POST":
+            await _ensure_roster_assignments(database)
             if actor["role"] != "founder":
                 return _response({"error":"Chỉ Người sáng lập được tạo tài khoản đồng loạt cho lớp."},403)
             body=await self._json_body(request)
@@ -829,6 +847,7 @@ class Default(WorkerEntrypoint):
             return _response({"accounts":[_public_user(row) for row in rows]})
 
         if path=="/api/accounts" and method=="POST":
+            await _ensure_roster_assignments(database)
             body=await self._json_body(request)
             role=str(body.get("role") or "member")
             group_no=body.get("group_no")
@@ -846,9 +865,11 @@ class Default(WorkerEntrypoint):
             name=_clean(body.get("full_name"),"Họ và tên",2,100)
             roster_member=_roster_entry(name) if role=="member" else None
             if roster_member:
-                roster_group,name=roster_member
+                default_group,name=roster_member
+                assignment=await _first(database,"SELECT group_no FROM roster_assignments WHERE student_key=?",_name_key(name))
+                roster_group=int(assignment["group_no"]) if assignment else int(default_group)
                 if actor["role"]=="leader" and int(actor["group_no"])!=roster_group:
-                    return _response({"error":"Học sinh này thuộc Tổ "+str(roster_group)+", bạn chỉ được tạo tài khoản cho thành viên tổ mình."},403)
+                    return _response({"error":"Học sinh này hiện thuộc Tổ "+str(roster_group)+", bạn chỉ được tạo tài khoản cho thành viên tổ mình."},403)
                 group_no=roster_group
             if role in ("leader","member"):
                 group_no=int(group_no or 0)
