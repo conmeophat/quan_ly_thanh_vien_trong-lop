@@ -65,8 +65,8 @@ def _normal_phone(value):
 
 def _normal_login(value):
     raw = str(value or "").strip()
-    numeric = re.sub(r"[\\s().-]", "", raw)
-    if re.fullmatch(r"\\+?[0-9]{8,16}", numeric):
+    numeric = re.sub(r"[\s().-]", "", raw)
+    if re.fullmatch(r"\+?[0-9]{8,16}", numeric):
         return _normal_phone(raw)
     username = raw.lower()
     if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{5,31}", username):
