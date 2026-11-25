@@ -148,6 +148,18 @@ async def _ensure_weekly_scores(database):
         await _run(database, "CREATE INDEX IF NOT EXISTS daily_scores_date_member ON daily_scores(score_date,member_id)")
 
 
+async def _ensure_online_presence(database):
+    try:
+        await _first(database, "SELECT user_id FROM online_presence LIMIT 1")
+    except Exception:
+        await _run(database,
+            "CREATE TABLE IF NOT EXISTS online_presence ("
+            "user_id INTEGER PRIMARY KEY REFERENCES users(id),"
+            "last_seen INTEGER NOT NULL)"
+        )
+        await _run(database, "CREATE INDEX IF NOT EXISTS online_presence_last_seen ON online_presence(last_seen)")
+
+
 async def _pbkdf2(password, salt):
     key = await crypto.subtle.importKey("raw", _u8(password.encode("utf-8")), _obj(name="PBKDF2"), False, to_js(["deriveBits"]))
     params = _obj(name="PBKDF2", salt=_u8(salt), iterations=PBKDF2_ITERATIONS, hash="SHA-256")
@@ -760,6 +772,63 @@ class Default(WorkerEntrypoint):
             return _response({"user":_public_user(actor)})
         if path=="/api/dashboard" and method=="GET":
             return _response(await self._dashboard(actor))
+        if path=="/api/presence/ping" and method=="POST":
+            await _ensure_online_presence(database)
+            now=int(time.time())
+            await _run(database,
+                "INSERT INTO online_presence(user_id,last_seen) VALUES(?,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET last_seen=excluded.last_seen",
+                int(actor["id"]),now
+            )
+            return _response({"ok":True,"last_seen":now})
+        if path=="/api/presence/leave" and method=="POST":
+            await _ensure_online_presence(database)
+            await _run(database,"DELETE FROM online_presence WHERE user_id=?",int(actor["id"]))
+            return _response({"ok":True})
+        if path=="/api/presence" and method=="GET":
+            if actor["role"] not in ("founder","teacher"):
+                return _response({"error":"Chỉ Người sáng lập và Giáo viên chủ nhiệm được xem trạng thái online toàn lớp."},403)
+            await _ensure_online_presence(database)
+            now=int(time.time())
+            cutoff=now-90
+            rows=await _all(database,
+                "SELECT u.id,u.full_name,u.role,u.group_no,COALESCE(p.last_seen,0) AS last_seen "
+                "FROM users u LEFT JOIN online_presence p ON p.user_id=u.id "
+                "WHERE u.role IN ('member','leader') AND u.is_active=1 AND u.registration_status='approved' "
+                "ORDER BY u.group_no,u.role,u.full_name COLLATE NOCASE"
+            )
+            groups=[]
+            for group_no in (1,2,3,4):
+                people=[]
+                for row in rows:
+                    if int(row["group_no"])!=group_no:
+                        continue
+                    last_seen=int(row["last_seen"] or 0)
+                    people.append({
+                        "id":int(row["id"]),
+                        "full_name":row["full_name"],
+                        "role":row["role"],
+                        "role_label":ROLE_LABELS.get(row["role"],row["role"]),
+                        "group_no":group_no,
+                        "last_seen":last_seen,
+                        "online":last_seen>=cutoff
+                    })
+                groups.append({
+                    "group_no":group_no,
+                    "total":len(people),
+                    "online_count":sum(1 for person in people if person["online"]),
+                    "members":people
+                })
+            total=sum(group["total"] for group in groups)
+            online_count=sum(group["online_count"] for group in groups)
+            return _response({
+                "server_time":now,
+                "online_window_seconds":90,
+                "total":total,
+                "online_count":online_count,
+                "offline_count":total-online_count,
+                "groups":groups
+            })
         if path=="/api/weekly-scores":
             return await self._weekly_scores(actor,request,method)
 
