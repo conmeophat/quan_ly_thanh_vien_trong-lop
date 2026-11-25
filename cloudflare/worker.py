@@ -1180,7 +1180,7 @@ class Default(WorkerEntrypoint):
 
             # Chỉ đổi mật khẩu cho học sinh (Thành viên/Tổ trưởng) đang hoạt động và đã được duyệt.
             rows=await _all(database,
-                "SELECT id,full_name,phone,role,group_no FROM users "
+                "SELECT id,full_name,phone,password_hash,role,group_no FROM users "
                 "WHERE role IN ('member','leader') AND is_active=1 AND registration_status='approved' "
                 "ORDER BY group_no,CASE role WHEN 'leader' THEN 0 ELSE 1 END,full_name COLLATE NOCASE"
             )
