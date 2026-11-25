@@ -515,6 +515,16 @@ document.getElementById("founder-login").addEventListener("submit", async functi
     button.disabled = false;
   }
 });
+async function checkMaintenanceReopened(){
+  try {
+    const response = await fetch("/api/maintenance", {credentials:"same-origin",cache:"no-store"});
+    if (!response.ok) return;
+    const state = await response.json();
+    if (state.enabled === false) window.location.replace("/");
+  } catch (_) {}
+}
+checkMaintenanceReopened();
+setInterval(checkMaintenanceReopened, 10000);
 </script>
 </body>
 </html>"""
@@ -910,6 +920,8 @@ document.getElementById("founder-login").addEventListener("submit", async functi
             maintenance_actor=await self._actor(request,database)
             if not maintenance_actor or maintenance_actor["role"]!="founder":
                 return _response({"code":"SITE_MAINTENANCE","error":MAINTENANCE_MESSAGE},503)
+        if not maintenance_enabled and path=="/api/maintenance" and method=="GET":
+            return _response({"enabled":False})
         if path=="/api/healthz" and method=="GET":
             await _first(database,"SELECT 1 AS ok")
             return _response({"status":"ok"})
