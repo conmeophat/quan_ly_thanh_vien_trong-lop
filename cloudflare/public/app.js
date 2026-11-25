@@ -254,7 +254,7 @@ function passwordPanel(el){
     ?'<div class="credential-reset-warning"><strong>Đổi mật khẩu an toàn</strong><p>Bạn chỉ có thể đổi mật khẩu tài khoản đang đăng nhập và phải nhập đúng mật khẩu hiện tại. Mật khẩu mới sẽ được đồng bộ vào file Excel dự phòng. Trình duyệt này đã được liên kết với tài khoản; muốn chuyển sang thiết bị khác, hãy liên hệ Người sáng lập hoặc Giáo viên chủ nhiệm.</p></div>'
     :"";
   el.innerHTML='<section class="card"><div class="row between"><h2>Đổi mật khẩu</h2><button class="btn alt" id="back-password">Quay lại</button></div><p class="muted">Nhập mật khẩu hiện tại và mật khẩu mới. Mật khẩu mới phải có từ 8 đến 128 ký tự.</p>'+studentNote+'<form id="change-password" class="form">'+field("Mật khẩu hiện tại","old_password","password")+field("Mật khẩu mới","new_password","password")+field("Nhập lại mật khẩu mới","confirm_password","password")+'<button class="btn">Cập nhật mật khẩu</button></form></section>';
-  el.querySelector("#back-password").onclick=dashboard;
+  el.querySelector("#back-password").onclick=()=>{tab="groups";dashboard()};
   el.querySelector("#change-password").onsubmit=async e=>{
     e.preventDefault();
     const data=fd(e.target);
@@ -263,7 +263,7 @@ function passwordPanel(el){
     try{
       await api("/api/password/change","POST",data);
       toast("Đã đổi mật khẩu và đồng bộ file Excel. Vui lòng đăng nhập lại bằng mật khẩu mới.");
-      stopRegistrationWatch();stopPresenceWatch();me=null;await start();
+      tab="groups";stopRegistrationWatch();stopPresenceWatch();me=null;await start();
     }catch(x){toast(x.message)}
   };
 }
