@@ -160,6 +160,21 @@ async def _ensure_online_presence(database):
         await _run(database, "CREATE INDEX IF NOT EXISTS online_presence_last_seen ON online_presence(last_seen)")
 
 
+
+
+async def _ensure_credential_vault(database):
+    try:
+        await _first(database, "SELECT user_id FROM credential_vault LIMIT 1")
+    except Exception:
+        await _run(database,
+            "CREATE TABLE IF NOT EXISTS credential_vault ("
+            "user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,"
+            "iv TEXT NOT NULL,ciphertext TEXT NOT NULL,"
+            "password_fingerprint TEXT NOT NULL,"
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+
+
 async def _pbkdf2(password, salt):
     key = await crypto.subtle.importKey("raw", _u8(password.encode("utf-8")), _obj(name="PBKDF2"), False, to_js(["deriveBits"]))
     params = _obj(name="PBKDF2", salt=_u8(salt), iterations=PBKDF2_ITERATIONS, hash="SHA-256")
@@ -188,6 +203,59 @@ async def _sign(payload, secret):
 async def _verify_signature(payload, signature, secret):
     key = await crypto.subtle.importKey("raw", _u8(secret.encode("utf-8")), _obj(name="HMAC", hash="SHA-256"), False, to_js(["verify"]))
     return bool(await crypto.subtle.verify("HMAC", key, _u8(signature), _u8(payload)))
+
+
+def _credential_vault_secret(env):
+    secret=getattr(env,"SESSION_SECRET","") or ""
+    if len(secret)<32:
+        raise ValueError("Không thể tạo bản sao mật khẩu an toàn: SESSION_SECRET chưa được cấu hình đủ 32 ký tự.")
+    return secret
+
+
+async def _credential_vault_key(secret):
+    # Tách khóa AES-GCM riêng bằng nhãn miền, không dùng trực tiếp khóa ký phiên.
+    material=await _sign(b"Class Merit Hub credential vault AES-GCM v1",secret)
+    return await crypto.subtle.importKey(
+        "raw",_u8(material),_obj(name="AES-GCM"),False,to_js(["encrypt","decrypt"])
+    )
+
+
+async def _store_credential(database,user_id,password,password_hash,secret):
+    key=await _credential_vault_key(secret)
+    iv=secrets.token_bytes(12)
+    params=_obj(name="AES-GCM",iv=_u8(iv))
+    ciphertext=_bytes_from_buffer(await crypto.subtle.encrypt(
+        params,key,_u8(password.encode("utf-8"))
+    ))
+    fingerprint=_b64(await _sign(password_hash.encode("utf-8"),secret))
+    await _run(database,
+        "INSERT INTO credential_vault(user_id,iv,ciphertext,password_fingerprint,updated_at) "
+        "VALUES(?,?,?,?,CURRENT_TIMESTAMP) "
+        "ON CONFLICT(user_id) DO UPDATE SET iv=excluded.iv,ciphertext=excluded.ciphertext,"
+        "password_fingerprint=excluded.password_fingerprint,updated_at=CURRENT_TIMESTAMP",
+        int(user_id),_b64(iv),_b64(ciphertext),fingerprint
+    )
+
+
+async def _load_credential(database,user_id,password_hash,secret):
+    row=await _first(database,
+        "SELECT iv,ciphertext,password_fingerprint FROM credential_vault WHERE user_id=?",
+        int(user_id)
+    )
+    if not row:
+        return None
+    expected=_b64(await _sign(str(password_hash).encode("utf-8"),secret))
+    if not hmac.compare_digest(str(row["password_fingerprint"]),expected):
+        return None
+    try:
+        key=await _credential_vault_key(secret)
+        params=_obj(name="AES-GCM",iv=_u8(_unb64(str(row["iv"]))))
+        raw=await crypto.subtle.decrypt(params,key,_u8(_unb64(str(row["ciphertext"]))))
+        return _bytes_from_buffer(raw).decode("utf-8")
+    except Exception:
+        # Khóa bí mật có thể đã được thay đổi hoặc dữ liệu mã hóa không còn hợp lệ.
+        return None
+
 
 async def _first(database, sql, *params):
     statement = database.prepare(sql)
@@ -960,13 +1028,16 @@ class Default(WorkerEntrypoint):
             await _ensure_roster_assignments(database)
             if actor["role"] != "founder":
                 return _response({"error":"Chỉ Người sáng lập được tạo tài khoản đồng loạt cho lớp."},403)
+            await _ensure_credential_vault(database)
+            vault_secret=_credential_vault_secret(self.env)
             body=await self._json_body(request)
             group_no=int(body.get("group_no") or 0)
             if group_no not in (1,2,3,4):
                 raise ValueError("Vui lòng chọn tổ từ 1 đến 4.")
 
             existing_rows=await _all(database,
-                "SELECT id,full_name,phone,role,group_no,is_active,registration_status FROM users WHERE role IN ('member','leader')"
+                "SELECT id,full_name,phone,password_hash,role,group_no,is_active,registration_status "
+                "FROM users WHERE role IN ('member','leader')"
             )
             target_keys={_name_key(name) for name in CLASS_ROSTER[group_no]}
             existing_by_name={}
@@ -984,6 +1055,7 @@ class Default(WorkerEntrypoint):
             pending_creations=[]
             created_count=0
             existing_count=0
+            password_reset_count=0
             for index,official_name in enumerate(CLASS_ROSTER[group_no],start=1):
                 key=_name_key(official_name)
                 assignment=await _first(database,"SELECT group_no FROM roster_assignments WHERE student_key=?",key)
@@ -996,19 +1068,42 @@ class Default(WorkerEntrypoint):
                         await _run(database,"UPDATE users SET group_no=? WHERE id=?",assigned_group,int(existing["id"]))
                         await _audit(database,int(actor["id"]),"roster_group_corrected",int(existing["id"]),
                             official_name+" | chuyển về Tổ "+str(assigned_group))
-                    if existing["role"]=="leader":
-                        status="Đang giữ vai trò Tổ trưởng Tổ "+str(existing["group_no"])+" — giữ nguyên tài khoản"
-                    elif not existing["is_active"]:
-                        status="Tài khoản đã khóa — không cấp lại tự động"
+
+                    password=""
+                    if existing["is_active"] and existing["registration_status"] in ("approved","pending"):
+                        password=await _load_credential(
+                            database,int(existing["id"]),str(existing["password_hash"]),vault_secret
+                        )
+                        if password is None:
+                            # Không thể đảo ngược bản băm cũ. Cấp mật khẩu mới một lần và
+                            # lưu bản mã AES-GCM để những lần xuất sau dùng đúng mật khẩu này.
+                            password=secrets.token_urlsafe(12)
+                            new_hash=await _hash_password(password)
+                            await _store_credential(
+                                database,int(existing["id"]),password,new_hash,vault_secret
+                            )
+                            await _run(database,
+                                "UPDATE users SET password_hash=?,session_version=session_version+1 WHERE id=?",
+                                new_hash,int(existing["id"])
+                            )
+                            await _run(database,"DELETE FROM login_throttle WHERE username_key=?",str(existing["phone"]))
+                            await _audit(database,int(actor["id"]),"roster_password_reissued",int(existing["id"]),
+                                official_name+" | mật khẩu được cấp lại để tạo bản sao đăng nhập an toàn")
+                            password_reset_count+=1
+
+                    if not existing["is_active"]:
+                        status="Tài khoản đã khóa — không thể đăng nhập"
                     elif existing["registration_status"]=="pending":
-                        status="Đã có tài khoản chờ duyệt — giữ nguyên mật khẩu"
+                        status="Đang chờ duyệt — mật khẩu đã có trong file"
                     elif existing["registration_status"]=="approved":
-                        status="Đã có tài khoản — giữ nguyên mật khẩu"
+                        status="Đã có tài khoản — mật khẩu hiện tại"
                     else:
                         status="Đăng ký đã bị từ chối — cần kiểm tra"
+                    if existing["role"]=="leader":
+                        status="Tổ trưởng Tổ "+str(existing["group_no"])+" — "+status
                     entries.append({
                         "group_no":assigned_group,"stt":index,"full_name":official_name,
-                        "username":existing["phone"],"password":"","status":status
+                        "username":existing["phone"],"password":password,"status":status
                     })
                     existing_count+=1
                     continue
@@ -1026,8 +1121,6 @@ class Default(WorkerEntrypoint):
                     "username":username,"password":password,"password_hash":password_hash
                 })
 
-            # Finish password hashing for the whole group before writing any new account.
-            # If a hash operation fails, no credentials from this group become orphaned in D1.
             created_ids=[]
             try:
                 for item in pending_creations:
@@ -1038,6 +1131,9 @@ class Default(WorkerEntrypoint):
                     created=await _first(database,"SELECT id FROM users WHERE phone=?",item["username"])
                     created_id=int(created["id"])
                     created_ids.append(created_id)
+                    await _store_credential(
+                        database,created_id,item["password"],item["password_hash"],vault_secret
+                    )
                     await _audit(database,int(actor["id"]),"bulk_create_student_account",created_id,
                         "Tổ "+str(item["group_no"])+" | "+item["full_name"]+" | "+item["username"])
                     entries.append({
@@ -1048,6 +1144,7 @@ class Default(WorkerEntrypoint):
             except Exception:
                 for created_id in created_ids:
                     try:
+                        await _run(database,"DELETE FROM credential_vault WHERE user_id=?",created_id)
                         await _run(database,"DELETE FROM audit_logs WHERE actor_id=? AND action='bulk_create_student_account' AND target_user_id=?",
                             int(actor["id"]),created_id)
                         await _run(database,"DELETE FROM users WHERE id=?",created_id)
@@ -1055,9 +1152,14 @@ class Default(WorkerEntrypoint):
                         pass
                 raise
 
+            await _audit(database,int(actor["id"]),"export_roster_credentials",None,
+                "Xuất thông tin đăng nhập Tổ "+str(group_no)+": tạo "+str(created_count)+
+                " tài khoản, "+str(existing_count)+" tài khoản đã tồn tại, cấp mới mật khẩu "+
+                str(password_reset_count)+" tài khoản.")
             return _response({
                 "ok":True,"group_no":group_no,"created_count":created_count,
-                "existing_count":existing_count,"entries":entries
+                "existing_count":existing_count,"password_reset_count":password_reset_count,
+                "entries":entries
             },201)
 
         if path=="/api/export/merit.xlsx":
@@ -1073,6 +1175,8 @@ class Default(WorkerEntrypoint):
             body=await self._json_body(request)
             if body.get("confirmation") != "CAP_LAI_MAT_KHAU_TOAN_LOP":
                 return _response({"error":"Xác nhận cấp lại mật khẩu không hợp lệ."},400)
+            await _ensure_credential_vault(database)
+            vault_secret=_credential_vault_secret(self.env)
 
             # Chỉ đổi mật khẩu cho học sinh (Thành viên/Tổ trưởng) đang hoạt động và đã được duyệt.
             rows=await _all(database,
@@ -1109,6 +1213,10 @@ class Default(WorkerEntrypoint):
                 "AND is_active=1 AND registration_status='approved'",
                 *[item["password_hash"] for item in credential_rows]
             )
+            for item in credential_rows:
+                await _store_credential(
+                    database,item["id"],item["password"],item["password_hash"],vault_secret
+                )
 
             # Xóa bộ đếm đăng nhập sai cũ để người dùng có thể dùng mật khẩu mới ngay.
             placeholders=",".join("?" for _ in credential_rows)
@@ -1191,12 +1299,18 @@ class Default(WorkerEntrypoint):
             else:
                 group_no=None
             phone=_normal_phone(body.get("phone"))
-            password_hash=await _hash_password(str(body.get("password") or ""))
+            password=str(body.get("password") or "")
+            password_hash=await _hash_password(password)
             try:
                 await _run(database,"INSERT INTO users(full_name,phone,password_hash,role,group_no,is_active,registration_status) VALUES(?,?,?,?,?,1,'approved')",name,phone,password_hash,role,group_no)
             except Exception as exc:
                 raise ValueError("Số điện thoại trùng hoặc đã tồn tại Tổ trưởng của tổ này.") from exc
             created=await _first(database,"SELECT id FROM users WHERE phone=?",phone)
+            if role in ("member","leader"):
+                await _ensure_credential_vault(database)
+                await _store_credential(
+                    database,int(created["id"]),password,password_hash,_credential_vault_secret(self.env)
+                )
             await _audit(database,int(actor["id"]),"create_account",int(created["id"]),role)
             return _response({"ok":True},201)
 
@@ -1258,6 +1372,11 @@ class Default(WorkerEntrypoint):
                         new_password = str(body.get("new_password") or "")
                     password_hash=await _hash_password(new_password)
                     await _run(database,"UPDATE users SET password_hash=?,session_version=session_version+1 WHERE id=?",password_hash,target_id)
+                    if target["role"] in ("member","leader") and target["is_active"]:
+                        await _ensure_credential_vault(database)
+                        await _store_credential(
+                            database,target_id,new_password,password_hash,_credential_vault_secret(self.env)
+                        )
                     details = "Đã cấp mật khẩu tạm; mật khẩu cũ và các phiên đăng nhập trước đã bị thu hồi." if generated_password else ""
                     await _audit(database,int(actor["id"]),"reset_password",target_id,details)
                     response = {"ok":True}
